@@ -197,20 +197,46 @@ def render_mpr_viewer(ct_path: str, seg_path: str | None = None):
             st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_chart")
 
     with tab_obl:
+        from ..mpr.oblique import normal_from_angles, center_from_volume
         st.markdown("**Oblique 단면 설정**")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            cx = st.number_input("Center X (mm)", value=0.0, step=1.0, key="obl_cx")
-            nx = st.number_input("Normal X", value=0.0, step=0.1, key="obl_nx")
-        with col2:
-            cy = st.number_input("Center Y (mm)", value=0.0, step=1.0, key="obl_cy")
-            ny = st.number_input("Normal Y", value=0.0, step=0.1, key="obl_ny")
-        with col3:
-            cz = st.number_input("Center Z (mm)", value=0.0, step=1.0, key="obl_cz")
-            nz = st.number_input("Normal Z", value=1.0, step=0.1, key="obl_nz")
+
+        input_mode = st.radio("입력 방식", ["슬라이더 (각도)", "직접 입력 (좌표)"],
+                              horizontal=True, key="obl_mode")
+
+        if input_mode == "슬라이더 (각도)":
+            # Auto-center on volume
+            vol_center = center_from_volume(ct_slicer.shape, ct_slicer.affine)
+            st.caption(f"볼륨 중심: ({vol_center[0]:.1f}, {vol_center[1]:.1f}, {vol_center[2]:.1f}) mm")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                theta = st.slider("방위각 (Azimuth)", 0, 360, 0, 5, key="obl_theta",
+                                  help="Z축 기준 XY 평면 회전")
+            with col2:
+                phi = st.slider("앙각 (Elevation)", -90, 90, 90, 5, key="obl_phi",
+                                help="XY 평면으로부터의 기울기. 90=Axial, 0=Sagittal/Coronal")
+            with col3:
+                offset = st.slider("오프셋 (mm)", -100.0, 100.0, 0.0, 1.0, key="obl_offset",
+                                   help="법선 방향으로 중심 이동")
+
+            normal = normal_from_angles(float(theta), float(phi))
+            center = vol_center + normal * offset
+        else:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                cx = st.number_input("Center X (mm)", value=0.0, step=1.0, key="obl_cx")
+                nx = st.number_input("Normal X", value=0.0, step=0.1, key="obl_nx")
+            with col2:
+                cy = st.number_input("Center Y (mm)", value=0.0, step=1.0, key="obl_cy")
+                ny = st.number_input("Normal Y", value=0.0, step=0.1, key="obl_ny")
+            with col3:
+                cz = st.number_input("Center Z (mm)", value=0.0, step=1.0, key="obl_cz")
+                nz = st.number_input("Normal Z", value=1.0, step=0.1, key="obl_nz")
+            center = np.array([cx, cy, cz])
+            normal = np.array([nx, ny, nz])
+
         obl_size = st.slider("Slice Size (px)", 128, 512, 256, 32, key="obl_size")
-        center = np.array([cx, cy, cz])
-        normal = np.array([nx, ny, nz])
+
         if np.linalg.norm(normal) > 0:
             ct_slice, _ = ct_slicer.get_oblique(center, normal, size=obl_size)
             seg_slice = None

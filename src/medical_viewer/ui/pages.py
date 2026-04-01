@@ -5,6 +5,7 @@ import streamlit as st
 
 PAGES = {
     "viewer": {"icon": "🏥", "label": "분석 뷰어", "description": "CT 업로드 및 분석"},
+    "editor": {"icon": "🎨", "label": "세그 편집", "description": "세그멘테이션 수동 편집"},
     "history": {"icon": "📋", "label": "분석 이력", "description": "이전 분석 결과 조회"},
     "models": {"icon": "🧠", "label": "모델 관리", "description": "nnUNet 모델 상태 확인"},
     "settings": {"icon": "⚙️", "label": "설정", "description": "앱 설정"},

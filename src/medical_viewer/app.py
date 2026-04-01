@@ -17,6 +17,7 @@ from medical_viewer.inference.model_registry import ModelRegistry
 from medical_viewer.inference.nnunet_runner import NnUNetRunner
 from medical_viewer.inference.pipeline import PipelineRunner
 from medical_viewer.renderer.client import RendererClient
+from medical_viewer.ui.seg_editor import render_seg_editor
 from medical_viewer.ui.pages import render_navigation
 from medical_viewer.ui.sidebar import render_sidebar
 from medical_viewer.ui.upload import render_upload
@@ -61,6 +62,8 @@ def main():
 
     if active_page == "viewer":
         page_viewer(config, registry, renderer, db)
+    elif active_page == "editor":
+        page_editor()
     elif active_page == "history":
         render_history_page(db)
     elif active_page == "models":
@@ -191,6 +194,16 @@ def run_inference(config, registry, db, selection, patient_info=None):
         import traceback
         st.code(traceback.format_exc())
         db.update_study(study.id, status="failed")
+
+
+def page_editor():
+    """Segmentation editor page."""
+    input_path = st.session_state.get("input_path")
+    seg_path = st.session_state.get("seg_path")
+    if input_path and seg_path:
+        render_seg_editor(str(input_path), str(seg_path))
+    else:
+        st.info("세그멘테이션 편집을 위해 먼저 '분석 뷰어'에서 CT와 세그멘테이션을 로드하세요.")
 
 
 def render_viewers(config, renderer):
