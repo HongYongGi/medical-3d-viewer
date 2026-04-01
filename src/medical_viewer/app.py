@@ -291,16 +291,30 @@ def render_export(seg_path):
 
 
 def _render_plotly_3d(seg_path):
-    if seg_path is None:
-        st.info("세그멘테이션 결과가 필요합니다.")
-        return
+    """Render 3D with both CT isosurface and segmentation meshes."""
+    input_path = st.session_state.get("input_path")
     try:
-        img = nib.load(str(seg_path))
         volume_data = {
-            "seg_volume": img.get_fdata(), "affine": img.affine,
             "labels": st.session_state.get("seg_labels", {}),
-            "spacing": tuple(img.header.get_zooms()[:3]),
         }
+        # Load CT volume
+        if input_path:
+            ct_img = nib.load(str(input_path))
+            volume_data["ct_volume"] = ct_img.get_fdata(dtype=np.float32)
+            volume_data["spacing"] = tuple(ct_img.header.get_zooms()[:3])
+            volume_data["affine"] = ct_img.affine
+
+        # Load segmentation
+        if seg_path:
+            seg_img = nib.load(str(seg_path))
+            volume_data["seg_volume"] = seg_img.get_fdata()
+            if "spacing" not in volume_data:
+                volume_data["spacing"] = tuple(seg_img.header.get_zooms()[:3])
+
+        if not volume_data.get("ct_volume") is not None and not volume_data.get("seg_volume") is not None:
+            st.info("CT 또는 세그멘테이션 데이터가 필요합니다.")
+            return
+
         render_3d_viewer_standalone(volume_data)
     except Exception as e:
         st.error(f"3D 렌더링 오류: {e}")
