@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "medical-3d-viewer"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.30.0",
+    "nibabel>=5.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "scikit-image>=0.21.0",
+    "plotly>=5.18.0",
+    "Pillow>=10.0.0",
+    "pyyaml>=6.0",
+    "httpx>=0.25.0",
+    "websockets>=12.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+nnunet = ["nnunetv2>=2.2"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+medical-viewer = "medical_viewer.__main__:main"

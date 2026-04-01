@@ -1,0 +1,38 @@
+models:
+  - id: "aorta_seg"
+    name: "대동맥 세그멘테이션"
+    dataset_id: 302
+    trainer: "nnUNetTrainer"
+    plans: "nnUNetResEncUNetMPlans"
+    configuration: "3d_fullres"
+    fold: "all"
+    weight_path: ""
+    labels:
+      1: "대동맥"
+      2: "좌심실"
+      3: "판막 영역"
+    description: "TAVR 대동맥 및 심장 구조물 세그멘테이션"
+
+  - id: "vessel_total"
+    name: "전체 혈관 세그멘테이션"
+    dataset_id: 402
+    trainer: "nnUNetTrainer"
+    plans: "nnUNetResEncUNetMPlans"
+    configuration: "3d_fullres"
+    fold: "all"
+    weight_path: ""
+    labels:
+      1: "대동맥"
+      2: "하대정맥"
+    description: "전체 혈관 세그멘테이션"
+
+pipelines:
+  - id: "tavr_full"
+    name: "TAVR 전체 파이프라인"
+    description: "대동맥 + 혈관 통합 분석 파이프라인"
+    steps:
+      - model_id: "aorta_seg"
+        priority: 1
+      - model_id: "vessel_total"
+        priority: 2
+    merge_strategy: "union"

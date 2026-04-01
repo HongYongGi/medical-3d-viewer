@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./configs:/app/configs
+    environment:
+      - RENDERER_URL=http://renderer:8080
+    depends_on:
+      - renderer
+
+  renderer:
+    build:
+      context: .
+      dockerfile: Dockerfile.go
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,24 @@
+app:
+  name: "Medical 3D Viewer"
+  host: "0.0.0.0"
+  port: 8501
+
+renderer:
+  host: "localhost"
+  port: 8080
+  url: "http://localhost:8080"
+
+paths:
+  uploads: "data/uploads"
+  results: "data/results"
+  models: "data/models"
+
+session:
+  timeout_minutes: 60
+
+nnunet:
+  results_dir: ""
+  raw_dir: ""
+  preprocessed_dir: ""
+  weight_dir: "/Users/hong-yong-gi/Library/Mobile Documents/com~apple~CloudDocs/project/03_weight"
+  auto_scan: true
