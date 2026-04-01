@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 nnunet = ["nnunetv2>=2.2"]
+dicom = ["dicom2nifti>=2.4.0", "pydicom>=2.4.0"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]

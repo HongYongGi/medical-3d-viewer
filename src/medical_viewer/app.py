@@ -103,8 +103,18 @@ def page_viewer(config, registry, renderer, db):
         if not seg_save_path.exists() or seg_save_path.stat().st_size != seg_file.size:
             with open(seg_save_path, "wb") as f:
                 f.write(seg_file.getbuffer())
-        st.session_state.seg_path = seg_save_path
-        st.session_state.inference_done = True
+        # Validate shape matches CT
+        if st.session_state.input_path:
+            from medical_viewer.core.export import validate_segmentation_shape
+            valid, msg = validate_segmentation_shape(st.session_state.input_path, seg_save_path)
+            if not valid:
+                st.sidebar.error(msg)
+            else:
+                st.session_state.seg_path = seg_save_path
+                st.session_state.inference_done = True
+        else:
+            st.session_state.seg_path = seg_save_path
+            st.session_state.inference_done = True
 
     if st.session_state.show_patient_form and can_run:
         patient_info = render_study_form(db)
@@ -187,8 +197,8 @@ def render_viewers(config, renderer):
     input_path = st.session_state.input_path
     seg_path = st.session_state.seg_path
 
-    view_tab1, view_tab2, view_tab3 = st.tabs(
-        ["\U0001f4d0 MPR 다면 재구성", "\U0001f9ca 3D 시각화", "\U0001f4ca 볼륨 정보"]
+    view_tab1, view_tab2, view_tab3, view_tab4 = st.tabs(
+        ["\U0001f4d0 MPR 다면 재구성", "\U0001f9ca 3D 시각화", "\U0001f4ca 볼륨 정보", "\U0001f4e5 내보내기"]
     )
 
     with view_tab1:
@@ -215,6 +225,56 @@ def render_viewers(config, renderer):
 
     with view_tab3:
         render_volume_info(input_path, seg_path)
+
+    with view_tab4:
+        render_export(seg_path)
+
+
+def render_export(seg_path):
+    """Render export/download tab."""
+    st.subheader("📥 결과 내보내기")
+    if seg_path is None:
+        st.info("세그멘테이션 결과가 필요합니다.")
+        return
+
+    from medical_viewer.core.export import export_nifti_bytes, export_stl_bytes
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**NIfTI 세그멘테이션 다운로드**")
+        nifti_data = export_nifti_bytes(seg_path)
+        st.download_button(
+            "📥 NIfTI (.nii.gz) 다운로드",
+            data=nifti_data,
+            file_name=Path(seg_path).name,
+            mime="application/gzip",
+            use_container_width=True,
+        )
+
+    with col2:
+        st.markdown("**STL 메쉬 다운로드 (3D 프린팅)**")
+        seg_img = nib.load(str(seg_path))
+        seg_data = seg_img.get_fdata()
+        unique_labels = np.unique(seg_data).astype(int)
+        unique_labels = unique_labels[unique_labels > 0]
+        labels_dict = st.session_state.get("seg_labels", {})
+
+        for label in unique_labels:
+            name = labels_dict.get(int(label), f"Label {int(label)}")
+            try:
+                stl_data = export_stl_bytes(seg_path, int(label))
+                st.download_button(
+                    f"📥 {name} (L{label}) STL",
+                    data=stl_data,
+                    file_name=f"label_{label}_{name}.stl",
+                    mime="model/stl",
+                    key=f"stl_{label}",
+                    use_container_width=True,
+                )
+            except ValueError:
+                st.caption(f"L{label}: 복셀 부족으로 메쉬 생성 불가")
+            except Exception as e:
+                st.caption(f"L{label}: {e}")
 
 
 def _render_plotly_3d(seg_path):
@@ -311,6 +371,8 @@ CT NIfTI 파일에 대한 **AI 기반 자동 세그멘테이션** + **MPR** + **
 
 def page_settings(config):
     st.header("⚙️ 설정")
+
+    st.subheader("서비스 상태")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**Streamlit 앱**")
@@ -324,10 +386,36 @@ def page_settings(config):
             st.error("연결 불가")
             st.code("cd go_renderer && go run cmd/renderer/main.go")
 
+    st.subheader("경로 설정")
     st.json({
         "업로드": str(config.paths.uploads), "결과": str(config.paths.results),
-        "모델": str(config.paths.models), "nnUNet": config.nnunet.results_dir or "(미설정)",
+        "모델": str(config.paths.models),
+        "가중치": config.nnunet.weight_dir or "(미설정)",
     })
+
+    # Data management
+    st.subheader("데이터 관리")
+    from medical_viewer.core.cleanup import cleanup_old_sessions, get_data_usage
+
+    data_dir = Path("data")
+    usage = get_data_usage(data_dir)
+    if usage:
+        cols = st.columns(len(usage))
+        for col, (name, size_mb) in zip(cols, usage.items()):
+            col.metric(name, f"{size_mb:.1f} MB")
+
+    st.markdown("---")
+    col_clean1, col_clean2 = st.columns(2)
+    with col_clean1:
+        max_age = st.number_input("정리 기준 (시간)", value=24, min_value=1, step=1, key="cleanup_hours")
+    with col_clean2:
+        if st.button("🗑️ 오래된 세션 정리", use_container_width=True):
+            removed = cleanup_old_sessions(data_dir, max_age_hours=max_age)
+            total = sum(removed.values())
+            if total > 0:
+                st.success(f"{total}개 세션 디렉토리 삭제 완료: {removed}")
+            else:
+                st.info(f"{max_age}시간 이내의 세션만 존재합니다.")
 
 
 @st.cache_resource(ttl=300)
