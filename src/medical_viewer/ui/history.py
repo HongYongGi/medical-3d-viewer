@@ -99,9 +99,19 @@ def _render_study_card(study: StudyRecord, db: StudyDatabase):
         with col_actions:
             if st.button("📂 열기", key=f"open_{study.id}", use_container_width=True):
                 _load_study(study)
+            confirm_key = f"confirm_del_{study.id}"
             if st.button("🗑️ 삭제", key=f"del_{study.id}", use_container_width=True):
-                db.delete_study(study.id)
-                st.rerun()
+                st.session_state[confirm_key] = True
+            if st.session_state.get(confirm_key, False):
+                st.warning("정말 삭제하시겠습니까?")
+                c1, c2 = st.columns(2)
+                if c1.button("✅ 확인", key=f"yes_{study.id}", use_container_width=True):
+                    db.delete_study(study.id)
+                    st.session_state.pop(confirm_key, None)
+                    st.rerun()
+                if c2.button("취소", key=f"no_{study.id}", use_container_width=True):
+                    st.session_state.pop(confirm_key, None)
+                    st.rerun()
 
 
 def _load_study(study: StudyRecord):

@@ -278,6 +278,6 @@ def _render_linked_view(ct_slicer, seg_slicer, **kwargs):
         st.plotly_chart(fig, use_container_width=True, key="linked_cor_chart")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def _get_slicer(nifti_path: str) -> MPRSlicer:
     return MPRSlicer(nifti_path)

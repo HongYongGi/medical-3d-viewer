@@ -37,10 +37,12 @@ class PipelineRunner:
             runner = NnUNetRunner(model_config)
             step_output = output_dir / step.model_id
 
-            def step_progress(frac: float, msg: str):
+            def step_progress(frac: float, msg: str,
+                               _start=step_frac_start, _size=step_frac_size,
+                               _id=step.model_id):
                 if progress_callback:
-                    total_frac = step_frac_start + frac * step_frac_size
-                    progress_callback(total_frac, f"[{step.model_id}] {msg}")
+                    total_frac = _start + frac * _size
+                    progress_callback(total_frac, f"[{_id}] {msg}")
 
             result_path = runner.predict(input_path, step_output, step_progress)
             results[step.model_id] = result_path

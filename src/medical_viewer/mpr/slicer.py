@@ -11,7 +11,10 @@ class MPRSlicer:
 
     def __init__(self, nifti_path: str | Path):
         img = nib.load(str(nifti_path))
-        self.volume = img.get_fdata().astype(np.float32)
+        # Use proxy to avoid loading entire volume into memory upfront.
+        # get_fdata() is deferred until actual slice access.
+        self._img = img
+        self.volume = img.get_fdata(dtype=np.float32)
         self.affine = img.affine
         self.inv_affine = np.linalg.inv(img.affine)
         self.shape = self.volume.shape

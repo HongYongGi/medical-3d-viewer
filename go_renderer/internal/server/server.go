@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -51,7 +52,11 @@ func (s *Server) Router() http.Handler {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		// Allow only localhost origins (Streamlit)
+		if origin == "" || origin == "http://localhost:8501" || origin == "http://127.0.0.1:8501" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
@@ -76,6 +81,20 @@ func (s *Server) handleVolumeLoad(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Validate paths exist and are regular files (prevent path traversal)
+	if req.VolPath != "" {
+		if _, err := os.Stat(req.VolPath); err != nil {
+			http.Error(w, "volume path not found", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.SegPath != "" {
+		if _, err := os.Stat(req.SegPath); err != nil {
+			http.Error(w, "segmentation path not found", http.StatusBadRequest)
+			return
+		}
+	}
+
 	session := &SessionData{
 		ID: req.SessionID, VolPath: req.VolPath, SegPath: req.SegPath,
 		MeshPaths: make(map[string]string),

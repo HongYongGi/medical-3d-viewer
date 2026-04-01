@@ -52,8 +52,8 @@ def main():
     )
 
     init_session_state()
-    config = load_config()
-    registry = ModelRegistry(config)
+    config = _get_config()
+    registry = _get_registry(config)
     renderer = RendererClient(config.renderer.url)
     db = StudyDatabase()
 
@@ -328,6 +328,18 @@ def page_settings(config):
         "업로드": str(config.paths.uploads), "결과": str(config.paths.results),
         "모델": str(config.paths.models), "nnUNet": config.nnunet.results_dir or "(미설정)",
     })
+
+
+@st.cache_resource(ttl=300)
+def _get_config():
+    """Cache config loading (includes weight directory scan). TTL=5min."""
+    return load_config()
+
+
+@st.cache_resource(ttl=300)
+def _get_registry(_config):
+    """Cache model registry. TTL=5min."""
+    return ModelRegistry(_config)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,12 @@ from pathlib import Path
 
 DB_PATH = Path("data/studies.db")
 
+ALLOWED_UPDATE_COLUMNS = frozenset({
+    "patient_id", "patient_name", "study_date", "modality", "description",
+    "seg_paths", "model_used", "pipeline_used", "status",
+    "updated_at", "notes", "tags", "thumbnail_path",
+})
+
 
 @dataclass
 class StudyRecord:
@@ -82,6 +88,7 @@ class StudyDatabase:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def create_study(self, record: StudyRecord) -> StudyRecord:
@@ -107,6 +114,10 @@ class StudyDatabase:
 
     def update_study(self, study_id: int, **kwargs) -> StudyRecord | None:
         kwargs["updated_at"] = datetime.now().isoformat()
+        # Validate column names against whitelist to prevent SQL injection
+        for k in kwargs:
+            if k not in ALLOWED_UPDATE_COLUMNS:
+                raise ValueError(f"Invalid column name: {k}")
         set_clauses = ", ".join(f"{k} = ?" for k in kwargs)
         values = list(kwargs.values())
         values.append(study_id)
