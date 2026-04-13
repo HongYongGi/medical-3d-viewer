@@ -1,14 +1,16 @@
 from __future__ import annotations
-import hashlib
+import os
 import streamlit as st
 import streamlit.components.v1 as components
 
 
-def _volume_hash(vol) -> str:
-    """Compute a stable hash for a numpy volume to use as cache key."""
-    import numpy as np
-    sample = vol.flat[::max(1, vol.size // 10000)]
-    return hashlib.md5(np.ascontiguousarray(sample).tobytes()).hexdigest()
+def _volume_cache_key(path: str) -> str:
+    """Compute a stable cache key from file path + size + mtime."""
+    try:
+        stat = os.stat(path)
+        return f"{path}:{stat.st_size}:{stat.st_mtime}"
+    except OSError:
+        return path
 
 
 def render_3d_viewer(session_id: str, renderer_url: str = "http://localhost:8080", height: int = 600):
@@ -34,6 +36,8 @@ def render_3d_viewer_standalone(volume_data: dict, height: int = 600):
     ct_vol = volume_data.get("ct_volume")
     labels = volume_data.get("labels", {})
     spacing = volume_data.get("spacing", (1.0, 1.0, 1.0))
+    ct_path = volume_data.get("ct_path", "")
+    seg_path = volume_data.get("seg_path", "")
 
     has_seg = seg_vol is not None
     has_ct = ct_vol is not None
@@ -57,11 +61,12 @@ def render_3d_viewer_standalone(volume_data: dict, height: int = 600):
 
     import plotly.graph_objects as go
     fig = go.Figure()
-    colors = ['#FF4444', '#44FF44', '#4444FF', '#FFFF44', '#FF44FF', '#44FFFF', '#FF8800', '#8800FF']
+    from ..core.constants import LABEL_COLORS_HEX as colors
 
     # CT isosurface
     if show_ct and has_ct:
-        ct_mesh = _generate_ct_mesh_cached(_volume_hash(ct_vol), ct_vol.shape, ct_vol, spacing, ct_threshold)
+        ct_key = _volume_cache_key(ct_path) if ct_path else str(id(ct_vol))
+        ct_mesh = _generate_ct_mesh_cached(ct_key, ct_vol.shape, ct_vol, spacing, ct_threshold)
         if ct_mesh is not None:
             verts, faces = ct_mesh
             fig.add_trace(go.Mesh3d(
@@ -73,7 +78,8 @@ def render_3d_viewer_standalone(volume_data: dict, height: int = 600):
 
     # Segmentation meshes
     if show_seg and has_seg:
-        mesh_data = _generate_meshes_cached(_volume_hash(seg_vol), seg_vol.shape, seg_vol, spacing)
+        seg_key = _volume_cache_key(seg_path) if seg_path else str(id(seg_vol))
+        mesh_data = _generate_meshes_cached(seg_key, seg_vol.shape, seg_vol, spacing)
         for i, (label, verts, faces) in enumerate(mesh_data):
             label_name = labels.get(int(label), f"레이블 {int(label)}")
             color = colors[i % len(colors)]

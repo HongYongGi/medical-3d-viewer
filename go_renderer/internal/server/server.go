@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 type Server struct {
 	dataDir  string
+	apiKey   string
 	sessions sync.Map
 }
 
@@ -32,13 +34,29 @@ type SessionData struct {
 	CreatedAt time.Time
 }
 
-func New(dataDir string) *Server {
-	return &Server{dataDir: dataDir}
+func New(dataDir string, apiKey string) *Server {
+	return &Server{dataDir: dataDir, apiKey: apiKey}
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.apiKey == "" || r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		key := r.Header.Get("X-API-Key")
+		if key != s.apiKey {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) Router() http.Handler {
 	r := mux.NewRouter()
 	r.Use(corsMiddleware)
+	r.Use(s.authMiddleware)
 
 	r.HandleFunc("/health", s.handleHealth).Methods("GET")
 	r.HandleFunc("/api/v1/volume/load", s.handleVolumeLoad).Methods("POST")
@@ -139,25 +157,33 @@ func (s *Server) handleMeshGenerate(w http.ResponseWriter, r *http.Request) {
 	meshDir := filepath.Join(s.dataDir, "meshes", sessionID)
 	results := make(map[string]string)
 
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	for _, label := range labels {
 		if label == 0 {
 			continue
 		}
-		mask := volume.ExtractMask(vol, label)
-		vertices, triangles := mesh.MarchingCubes(mask, spacing, 0.5)
-		if len(triangles) == 0 {
-			continue
-		}
-		vertices, triangles = mesh.Simplify(vertices, triangles, 0.5)
-		meshPath := filepath.Join(meshDir, fmt.Sprintf("label_%d.bin", label))
-		if err := mesh.SaveBinary(meshPath, vertices, triangles); err != nil {
-			log.Printf("Failed to save mesh for label %d: %v", label, err)
-			continue
-		}
-		labelStr := fmt.Sprintf("%d", label)
-		session.MeshPaths[labelStr] = meshPath
-		results[labelStr] = meshPath
+		wg.Add(1)
+		go func(label int) {
+			defer wg.Done()
+			mask, dimX, dimY, dimZ := volume.ExtractMask(vol, label)
+			vertices, triangles := mesh.MarchingCubes(mask, dimX, dimY, dimZ, spacing, 0.5)
+			if len(triangles) == 0 {
+				return
+			}
+			vertices, triangles = mesh.Simplify(vertices, triangles, 0.5)
+			meshPath := filepath.Join(meshDir, fmt.Sprintf("label_%d.bin", label))
+			if err := mesh.SaveBinary(meshPath, vertices, triangles); err != nil {
+				log.Printf("Failed to save mesh for label %d: %v", label, err)
+				return
+			}
+			mu.Lock()
+			session.MeshPaths[fmt.Sprintf("%d", label)] = meshPath
+			results[fmt.Sprintf("%d", label)] = meshPath
+			mu.Unlock()
+		}(label)
 	}
+	wg.Wait()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"session_id": sessionID, "meshes": results, "status": "generated",
@@ -234,25 +260,34 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	sessionID := vars["session_id"]
+	if !validSessionID.MatchString(sessionID) {
+		http.Error(w, "invalid session ID format", http.StatusBadRequest)
+		return
+	}
 	html := getViewerHTML(sessionID)
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
 }
 
-// validatePath checks that a file path exists and resides within the server's data directory.
+// validatePath checks that a file path exists, resolves symlinks, and resides within the server's data directory.
 func (s *Server) validatePath(path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
-	absDataDir, _ := filepath.Abs(s.dataDir)
-	if len(absDataDir) > 0 {
-		rel, err := filepath.Rel(absDataDir, absPath)
-		if err != nil || len(rel) >= 2 && rel[:2] == ".." {
-			return fmt.Errorf("path outside data directory")
-		}
+	// Resolve symlinks before checking containment
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return fmt.Errorf("path not found")
 	}
-	info, err := os.Stat(absPath)
+	resolvedDataDir, err := filepath.EvalSymlinks(s.dataDir)
+	if err != nil {
+		return fmt.Errorf("data directory error")
+	}
+	if !strings.HasPrefix(resolvedPath, resolvedDataDir+string(os.PathSeparator)) {
+		return fmt.Errorf("path outside data directory")
+	}
+	info, err := os.Stat(resolvedPath)
 	if err != nil {
 		return fmt.Errorf("path not found")
 	}

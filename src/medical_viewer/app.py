@@ -13,6 +13,7 @@ import numpy as np
 from medical_viewer.core.config import load_config
 from medical_viewer.core.session import Session
 from medical_viewer.core.database import StudyDatabase, StudyRecord
+from medical_viewer.core.volume_cache import get_slicer, get_volume
 from medical_viewer.inference.model_registry import ModelRegistry
 from medical_viewer.inference.nnunet_runner import NnUNetRunner
 from medical_viewer.inference.pipeline import PipelineRunner
@@ -102,7 +103,14 @@ def page_viewer(config, registry, renderer, db):
     )
     if seg_file is not None:
         seg_dir = session.result_dir(config.paths.results)
-        seg_save_path = seg_dir / seg_file.name
+        seg_filename = Path(seg_file.name).name
+        if not seg_filename or seg_filename.startswith('.'):
+            st.sidebar.error("잘못된 파일명입니다.")
+            return
+        seg_save_path = seg_dir / seg_filename
+        if not seg_save_path.resolve().is_relative_to(seg_dir.resolve()):
+            st.sidebar.error("잘못된 파일 경로입니다.")
+            return
         if not seg_save_path.exists() or seg_save_path.stat().st_size != seg_file.size:
             with open(seg_save_path, "wb") as f:
                 f.write(seg_file.getbuffer())
@@ -190,9 +198,9 @@ def run_inference(config, registry, db, selection, patient_info=None):
         st.code("pip install nnunetv2", language="bash")
         db.update_study(study.id, status="failed")
     except Exception as e:
-        st.error(f"분석 중 오류 발생: {e}")
-        import traceback
-        st.code(traceback.format_exc())
+        import logging
+        logging.exception("Inference failed")
+        st.error(f"분석 중 오류가 발생했습니다. 관리자에게 문의하세요.")
         db.update_study(study.id, status="failed")
 
 
@@ -266,8 +274,7 @@ def render_export(seg_path):
 
     with col2:
         st.markdown("**STL 메쉬 다운로드 (3D 프린팅)**")
-        seg_img = nib.load(str(seg_path))
-        seg_data = seg_img.get_fdata()
+        seg_data = get_volume(seg_path)
         unique_labels = np.unique(seg_data).astype(int)
         unique_labels = unique_labels[unique_labels > 0]
         labels_dict = st.session_state.get("seg_labels", {})
@@ -297,19 +304,19 @@ def _render_plotly_3d(seg_path):
         volume_data = {
             "labels": st.session_state.get("seg_labels", {}),
         }
-        # Load CT volume
         if input_path:
-            ct_img = nib.load(str(input_path))
-            volume_data["ct_volume"] = ct_img.get_fdata(dtype=np.float32)
-            volume_data["spacing"] = tuple(ct_img.header.get_zooms()[:3])
-            volume_data["affine"] = ct_img.affine
+            ct_slicer = get_slicer(str(input_path))
+            volume_data["ct_volume"] = ct_slicer.volume
+            volume_data["spacing"] = tuple(ct_slicer.voxel_spacing)
+            volume_data["affine"] = ct_slicer.affine
+            volume_data["ct_path"] = str(input_path)
 
-        # Load segmentation
         if seg_path:
-            seg_img = nib.load(str(seg_path))
-            volume_data["seg_volume"] = seg_img.get_fdata()
+            seg_slicer = get_slicer(str(seg_path))
+            volume_data["seg_volume"] = seg_slicer.volume
+            volume_data["seg_path"] = str(seg_path)
             if "spacing" not in volume_data:
-                volume_data["spacing"] = tuple(seg_img.header.get_zooms()[:3])
+                volume_data["spacing"] = tuple(seg_slicer.voxel_spacing)
 
         if volume_data.get("ct_volume") is None and volume_data.get("seg_volume") is None:
             st.info("CT 또는 세그멘테이션 데이터가 필요합니다.")
@@ -323,24 +330,24 @@ def _render_plotly_3d(seg_path):
 def render_volume_info(input_path, seg_path):
     st.subheader("볼륨 정보")
     try:
-        img = nib.load(str(input_path))
+        ct_slicer = get_slicer(str(input_path))
+        img = ct_slicer._img
         header = img.header
-        data = img.get_fdata()
+        data = ct_slicer.volume
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**CT 볼륨**")
             for k, v in {
-                "크기": str(img.shape),
-                "복셀 간격 (mm)": str(tuple(round(x, 3) for x in header.get_zooms()[:3])),
+                "크기": str(ct_slicer.shape),
+                "복셀 간격 (mm)": str(tuple(round(x, 3) for x in ct_slicer.voxel_spacing)),
                 "데이터 타입": str(header.get_data_dtype()),
-                "방향": str(nib.aff2axcodes(img.affine)),
+                "방향": str(nib.aff2axcodes(ct_slicer.affine)),
                 "HU 범위": f"[{data.min():.0f}, {data.max():.0f}]",
             }.items():
                 st.markdown(f"**{k}:** `{v}`")
         with col2:
             if seg_path:
-                seg_img = nib.load(str(seg_path))
-                seg_data = seg_img.get_fdata()
+                seg_data = get_volume(seg_path)
                 st.markdown("**세그멘테이션**")
                 unique_labels = np.unique(seg_data).astype(int)
                 unique_labels = unique_labels[unique_labels > 0]
@@ -348,7 +355,7 @@ def render_volume_info(input_path, seg_path):
                 for label in unique_labels:
                     count = int(np.sum(seg_data == label))
                     name = labels_dict.get(int(label), f"레이블 {label}")
-                    vol_ml = count * np.prod(header.get_zooms()[:3]) / 1000
+                    vol_ml = count * np.prod(ct_slicer.voxel_spacing) / 1000
                     st.markdown(f"**{label} - {name}:** {count:,} 복셀 ({vol_ml:.1f} mL)")
             else:
                 st.info("세그멘테이션 없음")

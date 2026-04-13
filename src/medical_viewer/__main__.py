@@ -1,11 +1,13 @@
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main():
+    app_path = str(Path(__file__).parent / "app.py")
     subprocess.run([
         sys.executable, "-m", "streamlit", "run",
-        "src/medical_viewer/app.py",
+        app_path,
         "--server.port=8501",
         "--server.headless=true",
     ])

@@ -8,18 +8,14 @@ type Triangle struct {
 	V1, V2, V3 uint32
 }
 
-func MarchingCubes(mask [][][]bool, spacing [3]float64, isovalue float64) ([]Vertex, []Triangle) {
-	dimX := len(mask)
-	if dimX < 2 {
+func MarchingCubes(mask []bool, dimX, dimY, dimZ int, spacing [3]float64, isovalue float64) ([]Vertex, []Triangle) {
+	if dimX < 2 || dimY < 2 || dimZ < 2 {
 		return nil, nil
 	}
-	dimY := len(mask[0])
-	if dimY < 2 {
-		return nil, nil
-	}
-	dimZ := len(mask[0][0])
-	if dimZ < 2 {
-		return nil, nil
+
+	// maskAt accesses the flat mask array with 3D indices
+	maskAt := func(x, y, z int) bool {
+		return mask[x*dimY*dimZ+y*dimZ+z]
 	}
 
 	var vertices []Vertex
@@ -44,14 +40,14 @@ func MarchingCubes(mask [][][]bool, spacing [3]float64, isovalue float64) ([]Ver
 			for z := 0; z < dimZ-1; z++ {
 				var cubeIndex uint8
 				corners := [8]float64{
-					boolToFloat(mask[x][y][z]),
-					boolToFloat(mask[x+1][y][z]),
-					boolToFloat(mask[x+1][y+1][z]),
-					boolToFloat(mask[x][y+1][z]),
-					boolToFloat(mask[x][y][z+1]),
-					boolToFloat(mask[x+1][y][z+1]),
-					boolToFloat(mask[x+1][y+1][z+1]),
-					boolToFloat(mask[x][y+1][z+1]),
+					boolToFloat(maskAt(x, y, z)),
+					boolToFloat(maskAt(x+1, y, z)),
+					boolToFloat(maskAt(x+1, y+1, z)),
+					boolToFloat(maskAt(x, y+1, z)),
+					boolToFloat(maskAt(x, y, z+1)),
+					boolToFloat(maskAt(x+1, y, z+1)),
+					boolToFloat(maskAt(x+1, y+1, z+1)),
+					boolToFloat(maskAt(x, y+1, z+1)),
 				}
 				for i := 0; i < 8; i++ {
 					if corners[i] >= isovalue {

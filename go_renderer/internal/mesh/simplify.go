@@ -1,7 +1,9 @@
 package mesh
 
 import (
+	"bufio"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -94,26 +96,29 @@ func boundingBox(verts []Vertex) (Vertex, Vertex) {
 }
 
 func SaveBinary(path string, vertices []Vertex, triangles []Triangle) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
+	os.MkdirAll(filepath.Dir(path), 0755)
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	binary.Write(f, binary.LittleEndian, uint32(len(vertices)))
-	binary.Write(f, binary.LittleEndian, uint32(len(triangles)))
+	w := bufio.NewWriter(f)
+	if err := binary.Write(w, binary.LittleEndian, uint32(len(vertices))); err != nil {
+		return fmt.Errorf("write vertex count: %w", err)
+	}
+	if err := binary.Write(w, binary.LittleEndian, uint32(len(triangles))); err != nil {
+		return fmt.Errorf("write triangle count: %w", err)
+	}
 	for _, v := range vertices {
-		binary.Write(f, binary.LittleEndian, v.X)
-		binary.Write(f, binary.LittleEndian, v.Y)
-		binary.Write(f, binary.LittleEndian, v.Z)
+		if err := binary.Write(w, binary.LittleEndian, [3]float32{v.X, v.Y, v.Z}); err != nil {
+			return fmt.Errorf("write vertex: %w", err)
+		}
 	}
 	for _, t := range triangles {
-		binary.Write(f, binary.LittleEndian, t.V1)
-		binary.Write(f, binary.LittleEndian, t.V2)
-		binary.Write(f, binary.LittleEndian, t.V3)
+		if err := binary.Write(w, binary.LittleEndian, [3]uint32{t.V1, t.V2, t.V3}); err != nil {
+			return fmt.Errorf("write triangle: %w", err)
+		}
 	}
-	return nil
+	return w.Flush()
 }

@@ -15,6 +15,7 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "Server port")
 	dataDir := flag.String("data", "data", "Data directory")
+	apiKey := flag.String("api-key", "", "API key for authentication (empty to disable)")
 	flag.Parse()
 
 	absData, err := filepath.Abs(*dataDir)
@@ -26,7 +27,7 @@ func main() {
 		os.MkdirAll(filepath.Join(absData, dir), 0755)
 	}
 
-	srv := server.New(absData)
+	srv := server.New(absData, *apiKey)
 	srv.StartSessionCleanup(5*time.Minute, 1*time.Hour)
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Go 3D Renderer starting on %s", addr)

@@ -15,12 +15,7 @@ from ..mpr.slicer import MPRSlicer
 from ..mpr.windowing import apply_window, WINDOW_PRESETS, COLORMAPS, auto_window
 from ..mpr.measurements import compute_distance, compute_all_label_areas
 
-LABEL_COLORS = {
-    1: (255, 50, 50, 180), 2: (50, 255, 50, 180), 3: (50, 50, 255, 180),
-    4: (255, 255, 50, 180), 5: (255, 50, 255, 180), 6: (50, 255, 255, 180),
-    7: (255, 140, 0, 180), 8: (148, 50, 255, 180), 9: (255, 192, 203, 180),
-    10: (139, 69, 19, 180),
-}
+from ..core.constants import LABEL_COLORS_RGBA as LABEL_COLORS
 
 
 def _create_mpr_figure(
@@ -402,6 +397,6 @@ def _render_measurement_tab(ct_slicer, seg_slicer, render_kwargs):
         st.plotly_chart(fig, use_container_width=True, key="meas_area_chart")
 
 
-@st.cache_resource(show_spinner=False)
 def _get_slicer(nifti_path: str) -> MPRSlicer:
-    return MPRSlicer(nifti_path)
+    from ..core.volume_cache import get_slicer
+    return get_slicer(nifti_path)

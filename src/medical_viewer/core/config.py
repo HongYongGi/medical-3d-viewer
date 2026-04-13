@@ -111,6 +111,10 @@ def load_config(config_dir: Path | str = "configs") -> AppConfig:
         models_data = yaml.safe_load(f)
 
     renderer = RendererConfig(**app_data.get("renderer", {}))
+    # Allow environment variable override for Docker/production
+    env_renderer_url = os.environ.get("RENDERER_URL")
+    if env_renderer_url:
+        renderer.url = env_renderer_url
     paths = PathsConfig(**app_data.get("paths", {}))
     nnunet_data = app_data.get("nnunet", {})
     nnunet = NnUNetConfig(

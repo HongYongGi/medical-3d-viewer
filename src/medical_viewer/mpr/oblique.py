@@ -10,7 +10,10 @@ def compute_plane_from_3_points(
     v1 = p2 - p1
     v2 = p3 - p1
     normal = np.cross(v1, v2)
-    normal = normal / np.linalg.norm(normal)
+    norm = np.linalg.norm(normal)
+    if norm < 1e-10:
+        raise ValueError("세 점이 일직선에 있어 평면을 정의할 수 없습니다.")
+    normal = normal / norm
     return center, normal
 
 

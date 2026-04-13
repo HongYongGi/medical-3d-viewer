@@ -22,7 +22,22 @@ type NIfTI1Header struct {
 	SclInter  float32
 }
 
-func LoadNIfTI(path string) ([][][]float32, [3]float64, error) {
+// Volume represents a 3D volume stored as a flat array for better cache performance.
+type Volume struct {
+	Data             []float32
+	DimX, DimY, DimZ int
+	Spacing          [3]float64
+}
+
+func (v *Volume) At(x, y, z int) float32 {
+	return v.Data[x*v.DimY*v.DimZ+y*v.DimZ+z]
+}
+
+func (v *Volume) Set(x, y, z int, val float32) {
+	v.Data[x*v.DimY*v.DimZ+y*v.DimZ+z] = val
+}
+
+func LoadNIfTI(path string) (*Volume, [3]float64, error) {
 	var reader io.Reader
 	f, err := os.Open(path)
 	if err != nil {
@@ -70,12 +85,12 @@ func LoadNIfTI(path string) ([][][]float32, [3]float64, error) {
 		voxOffset = 352
 	}
 
-	vol := make([][][]float32, dimX)
-	for i := range vol {
-		vol[i] = make([][]float32, dimY)
-		for j := range vol[i] {
-			vol[i][j] = make([]float32, dimZ)
-		}
+	vol := &Volume{
+		Data:    make([]float32, dimX*dimY*dimZ),
+		DimX:    dimX,
+		DimY:    dimY,
+		DimZ:    dimZ,
+		Spacing: spacing,
 	}
 
 	slope := hdr.SclSlope
@@ -121,8 +136,9 @@ func LoadNIfTI(path string) ([][][]float32, [3]float64, error) {
 					}
 				default:
 					return nil, spacing, fmt.Errorf("unsupported datatype: %d", hdr.Datatype)
+
 				}
-				vol[x][y][z] = val*slope + inter
+				vol.Set(x, y, z, val*slope+inter)
 			}
 		}
 	}
@@ -146,16 +162,12 @@ func parseHeader(data []byte) NIfTI1Header {
 	return h
 }
 
-func UniqueLabels(vol [][][]float32) []int {
+func UniqueLabels(vol *Volume) []int {
 	labelSet := make(map[int]bool)
-	for x := range vol {
-		for y := range vol[x] {
-			for z := range vol[x][y] {
-				v := int(vol[x][y][z])
-				if v != 0 {
-					labelSet[v] = true
-				}
-			}
+	for _, v := range vol.Data {
+		iv := int(v)
+		if iv != 0 {
+			labelSet[iv] = true
 		}
 	}
 	labels := make([]int, 0, len(labelSet))
@@ -165,16 +177,11 @@ func UniqueLabels(vol [][][]float32) []int {
 	return labels
 }
 
-func ExtractMask(vol [][][]float32, label int) [][][]bool {
-	mask := make([][][]bool, len(vol))
-	for x := range vol {
-		mask[x] = make([][]bool, len(vol[x]))
-		for y := range vol[x] {
-			mask[x][y] = make([]bool, len(vol[x][y]))
-			for z := range vol[x][y] {
-				mask[x][y][z] = int(vol[x][y][z]) == label
-			}
-		}
+func ExtractMask(vol *Volume, label int) (mask []bool, dimX, dimY, dimZ int) {
+	dimX, dimY, dimZ = vol.DimX, vol.DimY, vol.DimZ
+	mask = make([]bool, dimX*dimY*dimZ)
+	for i, v := range vol.Data {
+		mask[i] = int(v) == label
 	}
-	return mask
+	return
 }

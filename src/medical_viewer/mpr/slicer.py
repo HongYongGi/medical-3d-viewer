@@ -79,39 +79,17 @@ class MPRSlicer:
         Returns:
             (slice_image, transform_3x3)
         """
-        normal = normal / np.linalg.norm(normal)
+        norm_len = np.linalg.norm(normal)
+        if norm_len < 1e-10:
+            raise ValueError("Normal 벡터의 크기가 0에 가깝습니다.")
+        normal = normal / norm_len
 
-        if up is None:
-            if abs(np.dot(normal, [0, 0, 1])) < 0.9:
-                up = np.array([0.0, 0.0, 1.0])
-            else:
-                up = np.array([0.0, 1.0, 0.0])
-
-        right = np.cross(normal, up)
-        right /= np.linalg.norm(right)
-        up = np.cross(right, normal)
-        up /= np.linalg.norm(up)
-
-        if spacing is None:
-            spacing = float(np.min(self.voxel_spacing))
-
-        half = size / 2.0
-        u = np.linspace(-half * spacing, half * spacing, size)
-        v = np.linspace(-half * spacing, half * spacing, size)
-        uu, vv = np.meshgrid(u, v, indexing='xy')
-
-        world_points = (
-            center_world[np.newaxis, np.newaxis, :]
-            + uu[:, :, np.newaxis] * right[np.newaxis, np.newaxis, :]
-            + vv[:, :, np.newaxis] * up[np.newaxis, np.newaxis, :]
-        )
-
-        flat_world = world_points.reshape(-1, 3)
-        flat_voxel = self.world_to_voxel(flat_world)
-        coords = flat_voxel.T
+        coords = self._compute_oblique_coords(center_world, normal, up, size, spacing)
         values = map_coordinates(self.volume, coords, order=1, mode='constant', cval=-1024)
         slice_img = values.reshape(size, size)
-        transform = np.column_stack([right * spacing, up * spacing, center_world])
+
+        right, up_vec, sp = self._oblique_basis(normal, up, spacing)
+        transform = np.column_stack([right * sp, up_vec * sp, center_world])
         return slice_img, transform
 
     def get_oblique_seg(
@@ -124,34 +102,45 @@ class MPRSlicer:
         spacing: float | None = None,
     ) -> np.ndarray:
         """Same as get_oblique but for segmentation (nearest-neighbor)."""
-        normal = normal / np.linalg.norm(normal)
+        norm_len = np.linalg.norm(normal)
+        if norm_len < 1e-10:
+            raise ValueError("Normal 벡터의 크기가 0에 가깝습니다.")
+        normal = normal / norm_len
+
+        coords = self._compute_oblique_coords(center_world, normal, up, size, spacing)
+        values = map_coordinates(seg_volume, coords, order=0, mode='constant', cval=0)
+        return values.reshape(size, size).astype(np.int32)
+
+    def _oblique_basis(self, normal, up, spacing):
+        """Compute right/up basis vectors and effective spacing."""
         if up is None:
             if abs(np.dot(normal, [0, 0, 1])) < 0.9:
                 up = np.array([0.0, 0.0, 1.0])
             else:
                 up = np.array([0.0, 1.0, 0.0])
-
         right = np.cross(normal, up)
         right /= np.linalg.norm(right)
         up = np.cross(right, normal)
         up /= np.linalg.norm(up)
-
         if spacing is None:
             spacing = float(np.min(self.voxel_spacing))
+        return right, up, spacing
+
+    def _compute_oblique_coords(self, center_world, normal, up, size, spacing):
+        """Compute voxel coordinates for an oblique slice (shared by CT and seg)."""
+        right, up_vec, sp = self._oblique_basis(normal, up, spacing)
 
         half = size / 2.0
-        u = np.linspace(-half * spacing, half * spacing, size)
-        v = np.linspace(-half * spacing, half * spacing, size)
+        u = np.linspace(-half * sp, half * sp, size)
+        v = np.linspace(-half * sp, half * sp, size)
         uu, vv = np.meshgrid(u, v, indexing='xy')
 
         world_points = (
             center_world[np.newaxis, np.newaxis, :]
             + uu[:, :, np.newaxis] * right[np.newaxis, np.newaxis, :]
-            + vv[:, :, np.newaxis] * up[np.newaxis, np.newaxis, :]
+            + vv[:, :, np.newaxis] * up_vec[np.newaxis, np.newaxis, :]
         )
 
         flat_world = world_points.reshape(-1, 3)
         flat_voxel = self.world_to_voxel(flat_world)
-        coords = flat_voxel.T
-        values = map_coordinates(seg_volume, coords, order=0, mode='constant', cval=0)
-        return values.reshape(size, size).astype(np.int32)
+        return flat_voxel.T

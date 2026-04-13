@@ -10,11 +10,7 @@ import plotly.graph_objects as go
 
 from ..mpr.windowing import apply_window
 
-LABEL_COLORS = {
-    1: (255, 50, 50), 2: (50, 255, 50), 3: (50, 50, 255),
-    4: (255, 255, 50), 5: (255, 50, 255), 6: (50, 255, 255),
-    7: (255, 140, 0), 8: (148, 50, 255),
-}
+from ..core.constants import LABEL_COLORS_RGB as LABEL_COLORS
 
 
 def render_seg_editor(ct_path: str, seg_path: str):
@@ -22,9 +18,12 @@ def render_seg_editor(ct_path: str, seg_path: str):
     st.header("🎨 세그멘테이션 편집")
     st.caption("AI 세그멘테이션 결과를 수동으로 수정합니다.")
 
-    seg_img = nib.load(seg_path)
-    ct_data = nib.load(ct_path).get_fdata(dtype=np.float32)
-    seg_data = seg_img.get_fdata().astype(np.int32)
+    from ..core.volume_cache import get_slicer
+    ct_slicer = get_slicer(ct_path)
+    seg_slicer = get_slicer(seg_path)
+    seg_img = seg_slicer._img
+    ct_data = ct_slicer.volume
+    seg_data = seg_slicer.volume.astype(np.int32)
 
     unique_labels = sorted(set(np.unique(seg_data).astype(int)) - {0})
     if not unique_labels:
