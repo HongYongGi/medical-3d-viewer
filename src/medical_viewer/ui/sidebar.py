@@ -28,6 +28,9 @@ def _render_model_selector(registry: ModelRegistry) -> dict:
         st.sidebar.warning("등록된 모델이 없습니다.")
         return {"mode": "model", "selected_id": None}
 
+    # Cache availability check results to avoid repeated filesystem I/O
+    availability = {m.id: NnUNetRunner(m).check_model_available() for m in all_models}
+
     # Group by dataset_id
     dataset_groups: dict[int, list[ModelConfig]] = defaultdict(list)
     for m in all_models:
@@ -41,7 +44,7 @@ def _render_model_selector(registry: ModelRegistry) -> dict:
         first = models[0]
         base_name = first.name.split("(")[0].strip()
         variant_count = len(models)
-        available = sum(1 for m in models if NnUNetRunner(m).check_model_available())
+        available = sum(1 for m in models if availability[m.id])
         label = f"Dataset{did} — {base_name}"
         if variant_count > 1:
             label += f" ({variant_count}개 구성)"
@@ -69,7 +72,7 @@ def _render_model_selector(registry: ModelRegistry) -> dict:
         st.sidebar.markdown("**2. 구성(Configuration) 선택**")
         variant_labels = []
         for m in variants:
-            avail = "✅" if NnUNetRunner(m).check_model_available() else "❌"
+            avail = "✅" if availability[m.id] else "❌"
             variant_labels.append(f"{avail} {m.configuration} ({m.plans})")
 
         selected_var_idx = st.sidebar.selectbox(
@@ -93,7 +96,7 @@ def _render_model_selector(registry: ModelRegistry) -> dict:
             st.markdown(f"**Labels:** {labels_str}")
         if selected_model.num_training > 0:
             st.markdown(f"**학습 데이터:** {selected_model.num_training}건")
-        available = NnUNetRunner(selected_model).check_model_available()
+        available = availability[selected_model.id]
         st.markdown(f"**상태:** {'✅ 사용 가능' if available else '❌ 가중치 없음'}")
 
     st.sidebar.caption(selected_model.description)

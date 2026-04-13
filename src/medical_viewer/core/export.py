@@ -51,23 +51,27 @@ def _mesh_to_stl_binary(
     n_tri = len(faces)
     buf.write(np.uint32(n_tri).tobytes())
 
-    for i in range(n_tri):
-        f = faces[i]
-        # Normal vector
-        v0, v1, v2 = vertices[f[0]], vertices[f[1]], vertices[f[2]]
-        edge1 = v1 - v0
-        edge2 = v2 - v0
-        normal = np.cross(edge1, edge2)
-        norm_len = np.linalg.norm(normal)
-        if norm_len > 0:
-            normal /= norm_len
+    # Vectorized: compute all face normals at once
+    v0 = vertices[faces[:, 0]]
+    v1 = vertices[faces[:, 1]]
+    v2 = vertices[faces[:, 2]]
+    edge1 = v1 - v0
+    edge2 = v2 - v0
+    face_normals = np.cross(edge1, edge2)
+    norms = np.linalg.norm(face_normals, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    face_normals /= norms
 
-        # Write normal + 3 vertices + attribute byte count
-        buf.write(normal.astype(np.float32).tobytes())
-        buf.write(v0.astype(np.float32).tobytes())
-        buf.write(v1.astype(np.float32).tobytes())
-        buf.write(v2.astype(np.float32).tobytes())
-        buf.write(np.uint16(0).tobytes())
+    # Pack all triangles using structured array
+    record = np.zeros(n_tri, dtype=[
+        ('normal', '<f4', 3), ('v0', '<f4', 3), ('v1', '<f4', 3),
+        ('v2', '<f4', 3), ('attr', '<u2'),
+    ])
+    record['normal'] = face_normals.astype(np.float32)
+    record['v0'] = v0.astype(np.float32)
+    record['v1'] = v1.astype(np.float32)
+    record['v2'] = v2.astype(np.float32)
+    buf.write(record.tobytes())
 
     return buf.getvalue()
 

@@ -311,7 +311,7 @@ def _render_plotly_3d(seg_path):
             if "spacing" not in volume_data:
                 volume_data["spacing"] = tuple(seg_img.header.get_zooms()[:3])
 
-        if not volume_data.get("ct_volume") is not None and not volume_data.get("seg_volume") is not None:
+        if volume_data.get("ct_volume") is None and volume_data.get("seg_volume") is None:
             st.info("CT 또는 세그멘테이션 데이터가 필요합니다.")
             return
 
