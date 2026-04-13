@@ -152,18 +152,18 @@ fn infer_patch(session: &ort::session::Session, patch: &Array3<f32>) -> Result<A
         .run(ort::inputs![input_tensor])
         .map_err(|e| anyhow::anyhow!("Inference error: {e}"))?;
 
-    let output_tensor = outputs[0]
+    let (output_shape_ref, output_data) = outputs[0]
         .try_extract_tensor::<f32>()
         .map_err(|e| anyhow::anyhow!("Output extraction error: {e}"))?;
 
-    let output_shape = output_tensor.shape();
-    let nc = output_shape[1];
-    let od = output_shape[2];
-    let oh = output_shape[3];
-    let ow = output_shape[4];
+    let odims = output_shape_ref.dims();
+    let nc = odims[1];
+    let od = odims[2];
+    let oh = odims[3];
+    let ow = odims[4];
 
     // Copy to owned Array4 [nc, od, oh, ow]
-    let raw_out: Vec<f32> = output_tensor.iter().copied().collect();
+    let raw_out: Vec<f32> = output_data.iter().copied().collect();
     let out_5d = ndarray::Array5::<f32>::from_shape_vec([1, nc, od, oh, ow], raw_out)
         .context("Reshape output")?;
     let result = out_5d.index_axis(ndarray::Axis(0), 0).to_owned();
