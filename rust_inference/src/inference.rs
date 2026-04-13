@@ -156,11 +156,10 @@ fn infer_patch(session: &ort::session::Session, patch: &Array3<f32>) -> Result<A
         .try_extract_tensor::<f32>()
         .map_err(|e| anyhow::anyhow!("Output extraction error: {e}"))?;
 
-    let odims = output_shape_ref.dims();
-    let nc = odims[1];
-    let od = odims[2];
-    let oh = odims[3];
-    let ow = odims[4];
+    let nc = output_shape_ref[1] as usize;
+    let od = output_shape_ref[2] as usize;
+    let oh = output_shape_ref[3] as usize;
+    let ow = output_shape_ref[4] as usize;
 
     // Copy to owned Array4 [nc, od, oh, ow]
     let raw_out: Vec<f32> = output_data.iter().copied().collect();
