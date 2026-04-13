@@ -5,7 +5,7 @@ edition = "2021"
 description = "Fast nnUNet inference engine using ONNX Runtime"
 
 [dependencies]
-ort = "2.0.0-rc.12"
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["download-binaries"] }
 nifti = "0.16"
 ndarray = "0.17"
 clap = { version = "4", features = ["derive"] }
