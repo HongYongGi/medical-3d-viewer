@@ -11,7 +11,7 @@ pub fn load_model(model_path: &Path, use_cuda: bool) -> Result<ort::session::Ses
     let builder = ort::session::Session::builder()
         .map_err(|e| anyhow::anyhow!("Session builder error: {e}"))?;
 
-    let builder = if use_cuda {
+    let mut builder = if use_cuda {
         builder
             .with_execution_providers([
                 ort::execution_providers::CUDAExecutionProvider::default().build(),
@@ -149,21 +149,21 @@ fn infer_patch(session: &ort::session::Session, patch: &Array3<f32>) -> Result<A
         .map_err(|e| anyhow::anyhow!("Tensor creation error: {e}"))?;
 
     let outputs = session
-        .run(ort::inputs![input_tensor].map_err(|e| anyhow::anyhow!("Input error: {e}"))?)
+        .run(ort::inputs![input_tensor])
         .map_err(|e| anyhow::anyhow!("Inference error: {e}"))?;
 
-    let output_view = outputs[0]
-        .try_extract_tensor::<f32>()
+    let (output_shape, output_data) = outputs[0]
+        .try_extract_raw_tensor::<f32>()
         .map_err(|e| anyhow::anyhow!("Output extraction error: {e}"))?;
 
-    let output_shape = output_view.shape();
-    let nc = output_shape[1];
-    let od = output_shape[2];
-    let oh = output_shape[3];
-    let ow = output_shape[4];
+    let dims = output_shape.dims();
+    let nc = dims[1];
+    let od = dims[2];
+    let oh = dims[3];
+    let ow = dims[4];
 
     // Copy to owned Array4 [nc, od, oh, ow]
-    let raw_out: Vec<f32> = output_view.iter().copied().collect();
+    let raw_out: Vec<f32> = output_data.iter().copied().collect();
     let out_5d = ndarray::Array5::<f32>::from_shape_vec([1, nc, od, oh, ow], raw_out)
         .context("Reshape output")?;
     let result = out_5d.index_axis(ndarray::Axis(0), 0).to_owned();
