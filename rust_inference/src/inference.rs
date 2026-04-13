@@ -33,7 +33,7 @@ pub fn load_model(model_path: &Path, use_cuda: bool) -> Result<ort::session::Ses
 
 /// Run sliding window inference on a preprocessed volume.
 pub fn sliding_window_inference(
-    session: &ort::session::Session,
+    session: &mut ort::session::Session,
     volume: &Array3<f32>,
     patch_size: [usize; 3],
     num_classes: usize,
@@ -137,7 +137,7 @@ pub fn sliding_window_inference(
     Ok(segmentation)
 }
 
-fn infer_patch(session: &ort::session::Session, patch: &Array3<f32>) -> Result<Array4<f32>> {
+fn infer_patch(session: &mut ort::session::Session, patch: &Array3<f32>) -> Result<Array4<f32>> {
     let [d, h, w] = [patch.shape()[0], patch.shape()[1], patch.shape()[2]];
 
     // Build [1, 1, D, H, W] input
@@ -193,7 +193,7 @@ fn infer_patch(session: &ort::session::Session, patch: &Array3<f32>) -> Result<A
 }
 
 fn infer_with_mirroring(
-    session: &ort::session::Session,
+    session: &mut ort::session::Session,
     patch: &Array3<f32>,
     mirror_axes: &[usize],
 ) -> Result<Array4<f32>> {

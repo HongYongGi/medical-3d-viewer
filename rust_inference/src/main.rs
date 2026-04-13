@@ -92,11 +92,11 @@ fn main() -> Result<()> {
     // 4. Load ONNX model
     progress.report(0.25, "ONNX 모델 로딩 중...");
     let use_cuda = cli.device == "cuda";
-    let session = inference::load_model(&cli.model, use_cuda)?;
+    let mut session = inference::load_model(&cli.model, use_cuda)?;
 
     // 5. Sliding window inference
     let segmentation = inference::sliding_window_inference(
-        &session,
+        &mut session,
         &padded,
         config.patch_size_3d(),
         config.num_classes,
