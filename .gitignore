@@ -6,3 +6,4 @@ __pycache__/
 dist/
 build/
 .venv/
+rust_inference/target/
