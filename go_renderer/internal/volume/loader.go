@@ -50,6 +50,15 @@ func LoadNIfTI(path string) ([][][]float32, [3]float64, error) {
 		return nil, [3]float64{}, fmt.Errorf("file too small for NIfTI header")
 	}
 
+	// Detect NIfTI-2 by sizeof_hdr == 540
+	hdrSize := int32(binary.LittleEndian.Uint32(data[0:4]))
+	if hdrSize == 540 {
+		if len(data) < 540 {
+			return nil, [3]float64{}, fmt.Errorf("file too small for NIfTI-2 header")
+		}
+		return nil, [3]float64{}, fmt.Errorf("NIfTI-2 format not yet supported (header size: 540)")
+	}
+
 	hdr := parseHeader(data)
 	dimX := int(hdr.Dim[1])
 	dimY := int(hdr.Dim[2])

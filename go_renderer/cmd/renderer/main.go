@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/medical-3d-viewer/go-renderer/go_renderer/internal/server"
 )
@@ -26,6 +27,7 @@ func main() {
 	}
 
 	srv := server.New(absData)
+	srv.StartSessionCleanup(5*time.Minute, 1*time.Hour)
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Go 3D Renderer starting on %s", addr)
 	log.Printf("Data directory: %s", absData)

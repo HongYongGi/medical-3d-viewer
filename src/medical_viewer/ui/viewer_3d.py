@@ -1,6 +1,14 @@
 from __future__ import annotations
+import hashlib
 import streamlit as st
 import streamlit.components.v1 as components
+
+
+def _volume_hash(vol) -> str:
+    """Compute a stable hash for a numpy volume to use as cache key."""
+    import numpy as np
+    sample = vol.flat[::max(1, vol.size // 10000)]
+    return hashlib.md5(np.ascontiguousarray(sample).tobytes()).hexdigest()
 
 
 def render_3d_viewer(session_id: str, renderer_url: str = "http://localhost:8080", height: int = 600):
@@ -53,7 +61,7 @@ def render_3d_viewer_standalone(volume_data: dict, height: int = 600):
 
     # CT isosurface
     if show_ct and has_ct:
-        ct_mesh = _generate_ct_mesh_cached(id(ct_vol), ct_vol.shape, ct_vol, spacing, ct_threshold)
+        ct_mesh = _generate_ct_mesh_cached(_volume_hash(ct_vol), ct_vol.shape, ct_vol, spacing, ct_threshold)
         if ct_mesh is not None:
             verts, faces = ct_mesh
             fig.add_trace(go.Mesh3d(
@@ -65,7 +73,7 @@ def render_3d_viewer_standalone(volume_data: dict, height: int = 600):
 
     # Segmentation meshes
     if show_seg and has_seg:
-        mesh_data = _generate_meshes_cached(id(seg_vol), seg_vol.shape, seg_vol, spacing)
+        mesh_data = _generate_meshes_cached(_volume_hash(seg_vol), seg_vol.shape, seg_vol, spacing)
         for i, (label, verts, faces) in enumerate(mesh_data):
             label_name = labels.get(int(label), f"레이블 {int(label)}")
             color = colors[i % len(colors)]
@@ -86,7 +94,7 @@ def render_3d_viewer_standalone(volume_data: dict, height: int = 600):
 
 
 @st.cache_data(show_spinner="세그멘테이션 3D 메쉬 생성 중...")
-def _generate_meshes_cached(_vol_id: int, _shape: tuple, seg_vol, spacing: tuple) -> list[tuple]:
+def _generate_meshes_cached(_vol_hash: str, _shape: tuple, seg_vol, spacing: tuple) -> list[tuple]:
     import numpy as np
     from skimage import measure
     mesh_data = []
@@ -108,7 +116,7 @@ def _generate_meshes_cached(_vol_id: int, _shape: tuple, seg_vol, spacing: tuple
 
 @st.cache_data(show_spinner="CT 3D 표면 생성 중...")
 def _generate_ct_mesh_cached(
-    _vol_id: int, _shape: tuple, ct_vol, spacing: tuple, threshold: int
+    _vol_hash: str, _shape: tuple, ct_vol, spacing: tuple, threshold: int
 ) -> tuple | None:
     """Generate CT isosurface mesh at given HU threshold."""
     import numpy as np

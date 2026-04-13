@@ -7,13 +7,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/medical-3d-viewer/go-renderer/go_renderer/internal/mesh"
 	"github.com/medical-3d-viewer/go-renderer/go_renderer/internal/volume"
 )
+
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 type Server struct {
 	dataDir  string
@@ -25,6 +29,7 @@ type SessionData struct {
 	VolPath   string
 	SegPath   string
 	MeshPaths map[string]string
+	CreatedAt time.Time
 }
 
 func New(dataDir string) *Server {
@@ -81,23 +86,28 @@ func (s *Server) handleVolumeLoad(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Validate paths exist and are regular files (prevent path traversal)
+	// Validate session ID format
+	if !validSessionID.MatchString(req.SessionID) {
+		http.Error(w, "invalid session ID format", http.StatusBadRequest)
+		return
+	}
+	// Validate paths exist, are regular files, and reside within dataDir
 	if req.VolPath != "" {
-		if _, err := os.Stat(req.VolPath); err != nil {
-			http.Error(w, "volume path not found", http.StatusBadRequest)
+		if err := s.validatePath(req.VolPath); err != nil {
+			http.Error(w, "volume path not allowed: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
 	if req.SegPath != "" {
-		if _, err := os.Stat(req.SegPath); err != nil {
-			http.Error(w, "segmentation path not found", http.StatusBadRequest)
+		if err := s.validatePath(req.SegPath); err != nil {
+			http.Error(w, "segmentation path not allowed: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
 
 	session := &SessionData{
 		ID: req.SessionID, VolPath: req.VolPath, SegPath: req.SegPath,
-		MeshPaths: make(map[string]string),
+		MeshPaths: make(map[string]string), CreatedAt: time.Now(),
 	}
 	s.sessions.Store(req.SessionID, session)
 	json.NewEncoder(w).Encode(map[string]interface{}{"session_id": req.SessionID, "status": "loaded"})
@@ -196,7 +206,12 @@ func (s *Server) handleSessionInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		return origin == "" || origin == "http://localhost:8501" || origin == "http://127.0.0.1:8501"
+	},
+}
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -222,4 +237,46 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	html := getViewerHTML(sessionID)
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
+}
+
+// validatePath checks that a file path exists and resides within the server's data directory.
+func (s *Server) validatePath(path string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	absDataDir, _ := filepath.Abs(s.dataDir)
+	if len(absDataDir) > 0 {
+		rel, err := filepath.Rel(absDataDir, absPath)
+		if err != nil || len(rel) >= 2 && rel[:2] == ".." {
+			return fmt.Errorf("path outside data directory")
+		}
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return fmt.Errorf("path not found")
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("path is not a regular file")
+	}
+	return nil
+}
+
+// StartSessionCleanup runs a background goroutine that removes sessions older than maxAge.
+func (s *Server) StartSessionCleanup(interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			s.sessions.Range(func(key, value interface{}) bool {
+				session := value.(*SessionData)
+				if now.Sub(session.CreatedAt) > maxAge {
+					log.Printf("Cleaning up expired session: %s", session.ID)
+					s.sessions.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
 }

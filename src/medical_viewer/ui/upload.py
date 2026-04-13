@@ -33,10 +33,16 @@ def _upload_nifti(upload_dir: Path) -> Path | None:
 
     if uploaded_file is not None:
         upload_dir.mkdir(parents=True, exist_ok=True)
-        filename = uploaded_file.name
+        filename = Path(uploaded_file.name).name  # Strip directory components
+        if not filename or filename.startswith('.'):
+            st.sidebar.error("잘못된 파일명입니다.")
+            return None
         if not filename.endswith(('.nii', '.nii.gz')):
             filename = filename + '.nii.gz'
         save_path = upload_dir / filename
+        if not save_path.resolve().is_relative_to(upload_dir.resolve()):
+            st.sidebar.error("잘못된 파일 경로입니다.")
+            return None
         if not save_path.exists() or save_path.stat().st_size != uploaded_file.size:
             with open(save_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
@@ -99,10 +105,14 @@ def _convert_dicom_to_nifti(zip_path: Path, output_dir: Path) -> Path | None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
 
-        # Extract ZIP
+        # Extract ZIP (validate paths to prevent directory traversal)
         dicom_dir = tmp_path / "dicom"
         dicom_dir.mkdir()
         with zipfile.ZipFile(zip_path, 'r') as zf:
+            for member in zf.namelist():
+                member_path = (dicom_dir / member).resolve()
+                if not member_path.is_relative_to(dicom_dir.resolve()):
+                    raise ValueError(f"ZIP 파일에 안전하지 않은 경로가 포함되어 있습니다: {member}")
             zf.extractall(dicom_dir)
 
         # Find DICOM files (may be in subdirectory)

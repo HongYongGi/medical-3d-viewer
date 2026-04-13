@@ -70,12 +70,11 @@ class PipelineRunner:
 
             unique_labels = np.unique(data)
             unique_labels = unique_labels[unique_labels > 0]
-            for label in unique_labels:
+            for i, label in enumerate(sorted(unique_labels), start=1):
                 mask = data == label
-                new_label = label + current_label_offset
+                new_label = current_label_offset + i
                 merged_volume[mask & (merged_volume == 0)] = new_label
-            if len(unique_labels) > 0:
-                current_label_offset += int(unique_labels.max())
+            current_label_offset += len(unique_labels)
 
         merged_img = nib.Nifti1Image(merged_volume, ref_img.affine, ref_img.header)
         nib.save(merged_img, str(merged_path))

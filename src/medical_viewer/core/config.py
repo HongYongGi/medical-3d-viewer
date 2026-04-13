@@ -84,6 +84,23 @@ def _expand_env(value: str) -> str:
     return value
 
 
+_weight_scan_cache: dict[str, tuple[float, list]] = {}
+_WEIGHT_SCAN_TTL = 300  # 5 minutes
+
+
+def _cached_weight_scan(scanner, weight_dir: str) -> list:
+    """Cache weight scan results with TTL to avoid repeated filesystem I/O."""
+    import time
+    now = time.time()
+    if weight_dir in _weight_scan_cache:
+        cached_time, cached_result = _weight_scan_cache[weight_dir]
+        if now - cached_time < _WEIGHT_SCAN_TTL:
+            return cached_result
+    result = scanner.scan_all()
+    _weight_scan_cache[weight_dir] = (now, result)
+    return result
+
+
 def load_config(config_dir: Path | str = "configs") -> AppConfig:
     config_dir = Path(config_dir)
 
@@ -128,11 +145,11 @@ def load_config(config_dir: Path | str = "configs") -> AppConfig:
             steps=steps, merge_strategy=p.get("merge_strategy", "union"),
         ))
 
-    # Auto-scan weight directory and merge with manual models
+    # Auto-scan weight directory and merge with manual models (cached)
     if nnunet.auto_scan and nnunet.weight_dir:
         from ..inference.weight_scanner import WeightScanner
         scanner = WeightScanner(Path(nnunet.weight_dir))
-        scanned = scanner.scan_all()
+        scanned = _cached_weight_scan(scanner, nnunet.weight_dir)
 
         # Collect manual model keys for dedup
         manual_keys = {(m.dataset_id, m.configuration) for m in models}

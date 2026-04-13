@@ -50,22 +50,36 @@ def _create_mpr_figure(
     if seg_slice is not None and show_seg:
         unique_labels = np.unique(seg_slice)
         unique_labels = unique_labels[unique_labels > 0]
-        for label in unique_labels:
-            if visible_labels is not None and int(label) not in visible_labels:
-                continue
-            color = LABEL_COLORS.get(int(label), (200, 200, 200, 128))
-            r, g, b, a = color
-            mask = (seg_slice == label).astype(np.float32)
 
-            if overlay_mode in ("fill", "both"):
-                mask_display = np.where(mask > 0, seg_opacity, np.nan)
-                fig.add_trace(go.Heatmap(
-                    z=mask_display,
-                    colorscale=[[0, f"rgba({r},{g},{b},0)"], [1, f"rgba({r},{g},{b},{a})"]],
-                    showscale=False, hoverinfo="skip", zmin=0, zmax=1,
-                ))
+        if overlay_mode in ("fill", "both") and len(unique_labels) > 0:
+            # Combine all labels into a single RGBA image instead of per-label traces
+            h, w = seg_slice.shape
+            rgba = np.zeros((h, w, 4), dtype=np.float32)
+            for label in unique_labels:
+                if visible_labels is not None and int(label) not in visible_labels:
+                    continue
+                color = LABEL_COLORS.get(int(label), (200, 200, 200, 128))
+                r, g, b, a = color
+                mask = seg_slice == label
+                rgba[mask, 0] = r / 255.0
+                rgba[mask, 1] = g / 255.0
+                rgba[mask, 2] = b / 255.0
+                rgba[mask, 3] = seg_opacity
+            # Convert to single heatmap with custom data
+            seg_intensity = np.where(rgba[:, :, 3] > 0, rgba[:, :, 3], np.nan)
+            # Use the dominant color via a single Image trace
+            from PIL import Image as PILImage
+            rgba_uint8 = (rgba * 255).astype(np.uint8)
+            rgba_uint8[:, :, 3] = (rgba[:, :, 3] * 255).astype(np.uint8)
+            fig.add_trace(go.Image(z=rgba_uint8, opacity=seg_opacity, hoverinfo="skip"))
 
-            if overlay_mode in ("contour", "both"):
+        if overlay_mode in ("contour", "both"):
+            for label in unique_labels:
+                if visible_labels is not None and int(label) not in visible_labels:
+                    continue
+                color = LABEL_COLORS.get(int(label), (200, 200, 200, 128))
+                r, g, b, _ = color
+                mask = (seg_slice == label).astype(np.float32)
                 fig.add_trace(go.Contour(
                     z=mask, showscale=False, hoverinfo="skip",
                     contours=dict(start=0.5, end=0.5, size=1, coloring="none"),

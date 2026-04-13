@@ -11,8 +11,7 @@ class MPRSlicer:
 
     def __init__(self, nifti_path: str | Path):
         img = nib.load(str(nifti_path))
-        # Use proxy to avoid loading entire volume into memory upfront.
-        # get_fdata() is deferred until actual slice access.
+        # Load volume into memory once; callers cache this instance via @st.cache_resource.
         self._img = img
         self.volume = img.get_fdata(dtype=np.float32)
         self.affine = img.affine
