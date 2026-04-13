@@ -24,8 +24,11 @@ pub fn load_model(model_path: &Path, use_cuda: bool) -> Result<ort::session::Ses
         builder
     };
 
+    // Read model bytes and load from memory (works without load-dynamic feature)
+    let model_bytes = std::fs::read(model_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read ONNX {}: {e}", model_path.display()))?;
     let session = builder
-        .commit_from_file(model_path)
+        .commit_from_memory(&model_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to load ONNX {}: {e}", model_path.display()))?;
 
     Ok(session)
@@ -140,13 +143,12 @@ pub fn sliding_window_inference(
 fn infer_patch(session: &mut ort::session::Session, patch: &Array3<f32>) -> Result<Array4<f32>> {
     let [d, h, w] = [patch.shape()[0], patch.shape()[1], patch.shape()[2]];
 
-    // Build [1, 1, D, H, W] input
+    // Build [1, 1, D, H, W] input using (shape, data) tuple to avoid ndarray version conflicts
     let raw: Vec<f32> = patch.iter().copied().collect();
-    let input = ndarray::Array5::<f32>::from_shape_vec([1, 1, d, h, w], raw)
-        .context("Failed to reshape input")?;
-
-    let input_tensor = ort::value::Tensor::from_array(input)
-        .map_err(|e| anyhow::anyhow!("Tensor creation error: {e}"))?;
+    let input_tensor = ort::value::Tensor::from_array(
+        ([1_usize, 1, d, h, w], raw.into_boxed_slice()),
+    )
+    .map_err(|e| anyhow::anyhow!("Tensor creation error: {e}"))?;
 
     let outputs = session
         .run(ort::inputs![input_tensor])
