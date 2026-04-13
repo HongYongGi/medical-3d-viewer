@@ -4,7 +4,7 @@ CT 영상 세그멘테이션 분석 및 3D 시각화 플랫폼. nnUNet v2 기반
 
 ## Features
 
-- **AI 자동 세그멘테이션** - nnUNet v2 통합, 단일 모델 또는 다중 모델 파이프라인 실행
+- **AI 자동 세그멘테이션** - nnUNet v2 통합 + Rust ONNX Runtime 가속 (2-4x 빠른 추론)
 - **MPR 다면 재구성** - Axial / Sagittal / Coronal / Oblique 슬라이스 + 3-Panel 연동 뷰
 - **3D 시각화** - Go 기반 Three.js 렌더러 (Plotly 폴백 지원)
 - **윈도우 프리셋** - Lung, Bone, Mediastinum 등 원클릭 CT Window/Level
@@ -18,9 +18,9 @@ CT 영상 세그멘테이션 분석 및 3D 시각화 플랫폼. nnUNet v2 기반
 
 | Layer | Stack |
 |-------|-------|
-| Frontend | Streamlit, Plotly |
+| Frontend | Streamlit, Plotly, PIL (fast render) |
 | 3D Renderer | Go 1.22, gorilla/mux, gorilla/websocket, Three.js |
-| AI Engine | PyTorch, nnUNet v2 |
+| AI Engine | Rust + ONNX Runtime (fast), PyTorch + nnUNet v2 (fallback) |
 | Medical I/O | nibabel, pydicom, dicom2nifti, scikit-image |
 | Database | SQLite |
 
@@ -30,18 +30,23 @@ CT 영상 세그멘테이션 분석 및 3D 시각화 플랫폼. nnUNet v2 기반
 medical-3d-viewer/
 ├── src/medical_viewer/        # Python 메인 패키지
 │   ├── app.py                 # Streamlit 앱 진입점
-│   ├── core/                  # 설정, DB, 세션, 내보내기
-│   ├── inference/             # nnUNet 추론, 파이프라인, 모델 스캐너
-│   ├── mpr/                   # MPR 슬라이서, 윈도우, 측정
+│   ├── core/                  # 설정, DB, 세션, 내보내기, 상수
+│   ├── inference/             # nnUNet 추론 (Rust/Python 자동 선택)
+│   ├── mpr/                   # MPR 슬라이서, 윈도우, 측정, fast render
 │   ├── renderer/              # Go 렌더러 HTTP 클라이언트
 │   └── ui/                    # Streamlit UI 컴포넌트
+├── rust_inference/            # Rust ONNX 추론 엔진
+│   └── src/                   # config, nifti_io, preprocess,
+│                              # inference, postprocess, progress
 ├── go_renderer/               # Go 3D 렌더러 서비스
 │   ├── cmd/renderer/          # 진입점
 │   ├── internal/server/       # HTTP/WebSocket 서버
 │   ├── internal/mesh/         # Marching Cubes, 메쉬 심플리파이
 │   └── internal/volume/       # NIfTI 볼륨 로더
+├── scripts/                   # 유틸리티 스크립트
+│   └── export_onnx.py         # PyTorch → ONNX 변환
 ├── configs/                   # app.yaml, models.yaml
-├── tests/                     # 단위 테스트
+├── tests/                     # 단위 테스트 (49개)
 ├── Dockerfile.python          # Python 컨테이너
 ├── Dockerfile.go              # Go 컨테이너
 └── docker-compose.yaml        # 멀티 서비스 오케스트레이션
