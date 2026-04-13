@@ -97,9 +97,37 @@ def load_network_via_predictor(model_dir: Path, configuration: str, plans: dict)
     except ImportError:
         raise ImportError("nnunetv2 is required. pip install nnunetv2")
 
-    # Suppress nnUNet env warnings
     os.environ.setdefault("nnUNet_raw", "/tmp/placeholder")
     os.environ.setdefault("nnUNet_preprocessed", "/tmp/placeholder")
+
+    # model_dir may be fold_all/fold_0/trainer_dir — normalize to trainer_dir
+    trainer_dir = model_dir
+    if model_dir.name.startswith("fold_"):
+        trainer_dir = model_dir.parent
+
+    # Find available folds
+    available_folds = []
+    for entry in sorted(trainer_dir.iterdir()):
+        if entry.is_dir() and entry.name.startswith("fold_"):
+            available_folds.append(entry.name)
+
+    if not available_folds:
+        raise FileNotFoundError(f"No fold_* directories found in {trainer_dir}")
+
+    # Prefer fold_all, else first numbered fold
+    chosen_fold = next((f for f in available_folds if f == "fold_all"), available_folds[0])
+    fold_id = "all" if chosen_fold == "fold_all" else int(chosen_fold.split("_")[1])
+
+    # Find checkpoint
+    fold_dir = trainer_dir / chosen_fold
+    ckpt_name = "checkpoint_final.pth"
+    if not (fold_dir / ckpt_name).exists():
+        if (fold_dir / "checkpoint_best.pth").exists():
+            ckpt_name = "checkpoint_best.pth"
+        else:
+            raise FileNotFoundError(f"No checkpoint found in {fold_dir}")
+
+    print(f"  Fold: {chosen_fold}, Checkpoint: {ckpt_name}")
 
     predictor = nnUNetPredictor(
         tile_step_size=0.5,
@@ -110,19 +138,12 @@ def load_network_via_predictor(model_dir: Path, configuration: str, plans: dict)
         verbose_preprocessing=False,
     )
 
-    # initialize_from_trained_model_folder expects the trainer__plans__config folder
-    # model_dir can be fold_all or fold_0 etc — go up one level if needed
-    trainer_dir = model_dir
-    if model_dir.name.startswith("fold_"):
-        trainer_dir = model_dir.parent
-
     predictor.initialize_from_trained_model_folder(
         str(trainer_dir),
-        use_folds=("all",),
-        checkpoint_name="checkpoint_final.pth",
+        use_folds=(fold_id,),
+        checkpoint_name=ckpt_name,
     )
 
-    # predictor.network holds the loaded nn.Module
     network = predictor.network
     network.eval()
     return network
