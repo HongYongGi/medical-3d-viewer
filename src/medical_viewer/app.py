@@ -27,6 +27,8 @@ from medical_viewer.ui.viewer_3d import render_3d_viewer, render_3d_viewer_stand
 from medical_viewer.ui.progress import ProgressTracker
 from medical_viewer.ui.history import render_history_page, render_study_form
 from medical_viewer.ui.model_manager import render_model_manager
+from medical_viewer.core.export import export_nifti_bytes, export_stl_bytes, validate_segmentation_shape
+from medical_viewer.core.cleanup import cleanup_old_sessions, get_data_usage
 
 
 def init_session_state():
@@ -116,7 +118,6 @@ def page_viewer(config, registry, renderer, db):
                 f.write(seg_file.getbuffer())
         # Validate shape matches CT
         if st.session_state.input_path:
-            from medical_viewer.core.export import validate_segmentation_shape
             valid, msg = validate_segmentation_shape(st.session_state.input_path, seg_save_path)
             if not valid:
                 st.sidebar.error(msg)
@@ -257,8 +258,6 @@ def render_export(seg_path):
     if seg_path is None:
         st.info("세그멘테이션 결과가 필요합니다.")
         return
-
-    from medical_viewer.core.export import export_nifti_bytes, export_stl_bytes
 
     col1, col2 = st.columns(2)
     with col1:
@@ -429,8 +428,6 @@ def page_settings(config):
 
     # Data management
     st.subheader("데이터 관리")
-    from medical_viewer.core.cleanup import cleanup_old_sessions, get_data_usage
-
     data_dir = Path("data")
     usage = get_data_usage(data_dir)
     if usage:

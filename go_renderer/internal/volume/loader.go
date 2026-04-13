@@ -99,6 +99,12 @@ func LoadNIfTI(path string) (*Volume, [3]float64, error) {
 		slope = 1.0
 	}
 
+	bytesPerVoxel := int(hdr.Bitpix) / 8
+	expectedSize := voxOffset + dimX*dimY*dimZ*bytesPerVoxel
+	if len(data) < expectedSize {
+		return nil, spacing, fmt.Errorf("truncated NIfTI data: expected %d bytes, got %d", expectedSize, len(data))
+	}
+
 	idx := voxOffset
 	for z := 0; z < dimZ; z++ {
 		for y := 0; y < dimY; y++ {
@@ -106,34 +112,24 @@ func LoadNIfTI(path string) (*Volume, [3]float64, error) {
 				var val float32
 				switch hdr.Datatype {
 				case 2: // uint8
-					if idx < len(data) {
-						val = float32(data[idx])
-						idx++
-					}
+					val = float32(data[idx])
+					idx++
 				case 4: // int16
-					if idx+1 < len(data) {
-						v := int16(binary.LittleEndian.Uint16(data[idx:]))
-						val = float32(v)
-						idx += 2
-					}
+					v := int16(binary.LittleEndian.Uint16(data[idx:]))
+					val = float32(v)
+					idx += 2
 				case 8: // int32
-					if idx+3 < len(data) {
-						v := int32(binary.LittleEndian.Uint32(data[idx:]))
-						val = float32(v)
-						idx += 4
-					}
+					v := int32(binary.LittleEndian.Uint32(data[idx:]))
+					val = float32(v)
+					idx += 4
 				case 16: // float32
-					if idx+3 < len(data) {
-						bits := binary.LittleEndian.Uint32(data[idx:])
-						val = math.Float32frombits(bits)
-						idx += 4
-					}
+					bits := binary.LittleEndian.Uint32(data[idx:])
+					val = math.Float32frombits(bits)
+					idx += 4
 				case 512: // uint16
-					if idx+1 < len(data) {
-						v := binary.LittleEndian.Uint16(data[idx:])
-						val = float32(v)
-						idx += 2
-					}
+					v := binary.LittleEndian.Uint16(data[idx:])
+					val = float32(v)
+					idx += 2
 				default:
 					return nil, spacing, fmt.Errorf("unsupported datatype: %d", hdr.Datatype)
 

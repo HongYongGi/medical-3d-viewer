@@ -20,5 +20,5 @@ nnunet:
   results_dir: ""
   raw_dir: ""
   preprocessed_dir: ""
-  weight_dir: "/Users/hong-yong-gi/Library/Mobile Documents/com~apple~CloudDocs/project/03_weight"
+  weight_dir: "${NNUNET_WEIGHT_DIR}"
   auto_scan: true

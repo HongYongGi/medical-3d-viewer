@@ -32,7 +32,7 @@ def render_seg_editor(ct_path: str, seg_path: str):
 
     if "edited_seg" not in st.session_state or st.session_state.get("_edit_src") != seg_path:
         st.session_state.edited_seg = seg_data.copy()
-        st.session_state._edit_src = seg_path
+        st.session_state.seg_editor_src = seg_path
 
     edited = st.session_state.edited_seg
     edit_labels = sorted(set(np.unique(edited).astype(int)) - {0})

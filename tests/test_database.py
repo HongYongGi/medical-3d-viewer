@@ -1,14 +1,12 @@
 """Tests for StudyDatabase CRUD operations."""
 import tempfile
 from pathlib import Path
-import sys
-sys.path.insert(0, "src")
 
 from medical_viewer.core.database import StudyDatabase, StudyRecord, ALLOWED_UPDATE_COLUMNS
 
 
 def _make_db():
-    tmp = tempfile.mktemp(suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
     return StudyDatabase(tmp)
 
 

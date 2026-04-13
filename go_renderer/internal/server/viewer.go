@@ -1,8 +1,23 @@
 package server
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+)
 
-func getViewerHTML(sessionID string) string {
+var safeSessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
+
+func getViewerHTML(sessionID string, labelNames map[string]string) string {
+	if !safeSessionIDPattern.MatchString(sessionID) {
+		return "<!DOCTYPE html><html><body><h1>Invalid session ID</h1></body></html>"
+	}
+	labelNamesJSON := "{}"
+	if labelNames != nil && len(labelNames) > 0 {
+		if b, err := json.Marshal(labelNames); err == nil {
+			labelNamesJSON = string(b)
+		}
+	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,7 +60,10 @@ canvas { display: block; }
 const SESSION_ID = "%s";
 const API_BASE = window.location.origin;
 const LABEL_COLORS = {1:0xFF4444,2:0x44FF44,3:0x4444FF,4:0xFFFF44,5:0xFF44FF,6:0x44FFFF,7:0xFF8800,8:0x8800FF};
-const LABEL_NAMES = {1:'Aorta',2:'Left Ventricle',3:'Valve Region',4:'Label 4',5:'Label 5',6:'Label 6',7:'Label 7',8:'Label 8'};
+const _serverLabelNames = %s;
+const LABEL_NAMES = Object.fromEntries(
+    Object.entries(_serverLabelNames).map(([k,v]) => [parseInt(k), v])
+);
 let scene, camera, renderer, controls;
 let meshes = {};
 
@@ -150,5 +168,5 @@ document.getElementById('bg-color').addEventListener('input', function(e) {
 init();
 </script>
 </body>
-</html>`, sessionID)
+</html>`, sessionID, labelNamesJSON)
 }

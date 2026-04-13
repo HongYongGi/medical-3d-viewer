@@ -27,11 +27,12 @@ type Server struct {
 }
 
 type SessionData struct {
-	ID        string
-	VolPath   string
-	SegPath   string
-	MeshPaths map[string]string
-	CreatedAt time.Time
+	ID         string
+	VolPath    string
+	SegPath    string
+	MeshPaths  map[string]string
+	LabelNames map[string]string
+	LastAccess time.Time
 }
 
 func New(dataDir string, apiKey string) *Server {
@@ -73,11 +74,17 @@ func (s *Server) Router() http.Handler {
 	return r
 }
 
+func isAllowedOrigin(origin string) bool {
+	return origin == "" ||
+		origin == "http://localhost:8501" ||
+		origin == "http://127.0.0.1:8501" ||
+		origin == "http://streamlit:8501"
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		// Allow only localhost origins (Streamlit)
-		if origin == "" || origin == "http://localhost:8501" || origin == "http://127.0.0.1:8501" {
+		if isAllowedOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -96,9 +103,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVolumeLoad(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SessionID string `json:"session_id"`
-		VolPath   string `json:"vol_path"`
-		SegPath   string `json:"seg_path"`
+		SessionID  string            `json:"session_id"`
+		VolPath    string            `json:"vol_path"`
+		SegPath    string            `json:"seg_path"`
+		LabelNames map[string]string `json:"label_names,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -123,9 +131,14 @@ func (s *Server) handleVolumeLoad(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	labelNames := req.LabelNames
+	if labelNames == nil {
+		labelNames = make(map[string]string)
+	}
 	session := &SessionData{
 		ID: req.SessionID, VolPath: req.VolPath, SegPath: req.SegPath,
-		MeshPaths: make(map[string]string), CreatedAt: time.Now(),
+		MeshPaths: make(map[string]string), LabelNames: labelNames,
+		LastAccess: time.Now(),
 	}
 	s.sessions.Store(req.SessionID, session)
 	json.NewEncoder(w).Encode(map[string]interface{}{"session_id": req.SessionID, "status": "loaded"})
@@ -141,6 +154,7 @@ func (s *Server) handleMeshGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := val.(*SessionData)
+	session.LastAccess = time.Now()
 
 	if session.SegPath == "" {
 		http.Error(w, "no segmentation loaded", http.StatusBadRequest)
@@ -201,6 +215,7 @@ func (s *Server) handleMeshGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := val.(*SessionData)
+	session.LastAccess = time.Now()
 
 	meshPath, ok := session.MeshPaths[label]
 	if !ok {
@@ -221,6 +236,7 @@ func (s *Server) handleSessionInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := val.(*SessionData)
+	session.LastAccess = time.Now()
 
 	labels := make([]string, 0, len(session.MeshPaths))
 	for l := range session.MeshPaths {
@@ -234,8 +250,7 @@ func (s *Server) handleSessionInfo(w http.ResponseWriter, r *http.Request) {
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		return origin == "" || origin == "http://localhost:8501" || origin == "http://127.0.0.1:8501"
+		return isAllowedOrigin(r.Header.Get("Origin"))
 	},
 }
 
@@ -264,7 +279,13 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session ID format", http.StatusBadRequest)
 		return
 	}
-	html := getViewerHTML(sessionID)
+	var labelNames map[string]string
+	if val, ok := s.sessions.Load(sessionID); ok {
+		sess := val.(*SessionData)
+		sess.LastAccess = time.Now()
+		labelNames = sess.LabelNames
+	}
+	html := getViewerHTML(sessionID, labelNames)
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
 }
@@ -306,7 +327,7 @@ func (s *Server) StartSessionCleanup(interval, maxAge time.Duration) {
 			now := time.Now()
 			s.sessions.Range(func(key, value interface{}) bool {
 				session := value.(*SessionData)
-				if now.Sub(session.CreatedAt) > maxAge {
+				if now.Sub(session.LastAccess) > maxAge {
 					log.Printf("Cleaning up expired session: %s", session.ID)
 					s.sessions.Delete(key)
 				}

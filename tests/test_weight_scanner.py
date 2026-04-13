@@ -2,8 +2,6 @@
 import json
 import tempfile
 from pathlib import Path
-import sys
-sys.path.insert(0, "src")
 
 from medical_viewer.inference.weight_scanner import WeightScanner
 

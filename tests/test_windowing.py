@@ -1,7 +1,5 @@
 """Tests for MPR windowing functions."""
 import numpy as np
-import sys
-sys.path.insert(0, "src")
 
 from medical_viewer.mpr.windowing import apply_window, auto_window, WINDOW_PRESETS
 

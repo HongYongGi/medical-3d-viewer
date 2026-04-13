@@ -1,170 +1,156 @@
 # Medical 3D Viewer
 
-CT 영상 세그멘테이션 분석 및 3D 시각화 플랫폼. nnUNet v2 기반 자동 세그멘테이션, MPR 다면 재구성, 인터랙티브 3D 렌더링을 지원합니다.
+CT NIfTI 영상에 대한 **AI 기반 자동 세그멘테이션**, **MPR 다면 재구성**, **3D 시각화**를 제공하는 의료 영상 분석 도구입니다.
 
-## Features
+## 주요 기능
 
-- **AI 자동 세그멘테이션** - nnUNet v2 통합, 단일 모델 또는 다중 모델 파이프라인 실행
-- **MPR 다면 재구성** - Axial / Sagittal / Coronal / Oblique 슬라이스 + 3-Panel 연동 뷰
-- **3D 시각화** - Go 기반 Three.js 렌더러 (Plotly 폴백 지원)
-- **윈도우 프리셋** - Lung, Bone, Mediastinum 등 원클릭 CT Window/Level
-- **세그멘테이션 편집기** - Erosion, Dilation, 라벨 병합/삭제, HU 필터
-- **측정 도구** - 거리 및 면적 측정
-- **DICOM 지원** - ZIP 업로드 시 자동 NIfTI 변환
-- **내보내기** - NIfTI (.nii.gz) 및 STL (3D 프린팅용) 다운로드
-- **환자 DB** - SQLite 기반 분석 이력 관리
+- **CT 세그멘테이션** — nnUNet 기반 AI 모델을 통한 자동 장기/혈관 세그멘테이션
+- **MPR 뷰어** — Axial, Coronal, Sagittal 및 Oblique 다면 재구성, 윈도잉, 거리/각도 측정
+- **3D 시각화** — Go 렌더러(Marching Cubes 메쉬) 또는 Plotly 기반 Isosurface 렌더링
+- **세그멘테이션 편집기** — 레이블 브러시/지우개를 통한 수동 보정
+- **파이프라인** — 여러 모델을 순차 실행하고 결과를 병합하는 분석 파이프라인
+- **내보내기** — NIfTI 세그멘테이션 및 STL 메쉬(3D 프린팅용) 다운로드
+- **분석 이력** — 환자 정보 및 분석 결과 이력 관리 (SQLite)
+- **Rust 추론 엔진** — ONNX Runtime 기반 고속 추론 (선택)
 
-## Tech Stack
+## 아키텍처
 
-| Layer | Stack |
-|-------|-------|
-| Frontend | Streamlit, Plotly |
-| 3D Renderer | Go 1.22, gorilla/mux, gorilla/websocket, Three.js |
-| AI Engine | PyTorch, nnUNet v2 |
-| Medical I/O | nibabel, pydicom, dicom2nifti, scikit-image |
-| Database | SQLite |
+```
+┌─────────────────────────────────────────┐
+│  Streamlit (Python)          :8501      │
+│  ├── UI / MPR 뷰어 / 세그 편집기        │
+│  ├── nnUNet 추론 (PyTorch)              │
+│  └── Renderer Client (httpx)            │
+│            │                            │
+│            ▼                            │
+│  Go 3D Renderer              :8080      │
+│  ├── Marching Cubes 메쉬 생성           │
+│  ├── NIfTI 볼륨 로더                    │
+│  └── WebSocket 3D 뷰어                 │
+│                                         │
+│  Rust Inference (선택)                   │
+│  └── ONNX Runtime 기반 고속 추론         │
+└─────────────────────────────────────────┘
+```
 
-## Project Structure
+## 요구 사항
+
+- Python >= 3.10
+- Go >= 1.22 (3D 렌더러 사용 시)
+- Rust (ONNX 추론 엔진 사용 시)
+- nnUNet v2 모델 가중치 (세그멘테이션 실행 시)
+
+## 설치
+
+```bash
+# 기본 설치
+pip install -e .
+
+# nnUNet 포함 설치
+pip install -e ".[nnunet]"
+
+# DICOM 지원 포함
+pip install -e ".[dicom]"
+
+# 개발 의존성 (pytest, ruff)
+pip install -e ".[dev]"
+```
+
+## 실행
+
+### Streamlit 앱
+
+```bash
+make run
+# 또는
+streamlit run src/medical_viewer/app.py --server.port=8501
+```
+
+브라우저에서 `http://localhost:8501`로 접속합니다.
+
+### Go 3D 렌더러 (선택)
+
+```bash
+make run-renderer
+# 또는
+cd go_renderer && go run cmd/renderer/main.go
+```
+
+렌더러 없이도 Plotly 기반 3D 뷰어가 자동으로 사용됩니다.
+
+### Docker
+
+```bash
+docker compose up
+```
+
+Streamlit(:8501)과 Go 렌더러(:8080)가 함께 실행됩니다.
+
+## Rust 추론 엔진
+
+PyTorch 대신 ONNX Runtime을 사용하여 빠른 추론을 수행합니다.
+
+```bash
+# 1. PyTorch 모델을 ONNX로 변환
+python scripts/export_onnx.py \
+    --model-dir /path/to/nnUNet_results/DatasetXXX/.../fold_all \
+    --output-dir /path/to/output
+
+# 2. Rust 추론 엔진 빌드
+cd rust_inference
+cargo build --release
+
+# 3. 추론 실행
+./target/release/nnunet-infer \
+    --model model.onnx \
+    --config preprocess_config.json \
+    --input case.nii.gz \
+    --output seg.nii.gz
+```
+
+## 설정
+
+### `configs/app.yaml`
+
+앱 포트, 렌더러 주소, 데이터 경로, nnUNet 가중치 디렉토리 등을 설정합니다.
+
+### `configs/models.yaml`
+
+세그멘테이션 모델 및 파이프라인을 정의합니다. 모델별 dataset ID, trainer, plans, 레이블 매핑 등을 지정합니다.
+
+## 프로젝트 구조
 
 ```
 medical-3d-viewer/
-├── src/medical_viewer/        # Python 메인 패키지
-│   ├── app.py                 # Streamlit 앱 진입점
-│   ├── core/                  # 설정, DB, 세션, 내보내기
-│   ├── inference/             # nnUNet 추론, 파이프라인, 모델 스캐너
-│   ├── mpr/                   # MPR 슬라이서, 윈도우, 측정
+├── src/medical_viewer/
+│   ├── app.py                 # Streamlit 메인 앱
+│   ├── core/                  # 설정, 세션, DB, 내보내기
+│   ├── inference/             # nnUNet 추론, 모델 레지스트리, 파이프라인
+│   ├── mpr/                   # MPR 슬라이서, 윈도잉, 측정, Oblique
 │   ├── renderer/              # Go 렌더러 HTTP 클라이언트
 │   └── ui/                    # Streamlit UI 컴포넌트
-├── go_renderer/               # Go 3D 렌더러 서비스
-│   ├── cmd/renderer/          # 진입점
+├── go_renderer/               # Go 3D 렌더링 서버
+│   ├── cmd/renderer/          # 서버 진입점
+│   ├── internal/mesh/         # Marching Cubes, 메쉬 단순화
 │   ├── internal/server/       # HTTP/WebSocket 서버
-│   ├── internal/mesh/         # Marching Cubes, 메쉬 심플리파이
-│   └── internal/volume/       # NIfTI 볼륨 로더
-├── configs/                   # app.yaml, models.yaml
-├── tests/                     # 단위 테스트
-├── Dockerfile.python          # Python 컨테이너
-├── Dockerfile.go              # Go 컨테이너
-└── docker-compose.yaml        # 멀티 서비스 오케스트레이션
+│   ├── internal/volume/       # 볼륨 로더
+│   └── pkg/nifti/             # NIfTI 리더
+├── rust_inference/            # Rust ONNX 추론 엔진
+├── scripts/                   # ONNX 변환 스크립트
+├── configs/                   # 앱 및 모델 설정
+├── tests/                     # 테스트
+├── docker-compose.yaml
+├── Makefile
+└── pyproject.toml
 ```
 
-## Quick Start
-
-### Docker (권장)
+## 테스트
 
 ```bash
-docker compose up -d --build
+pip install -e ".[dev]"
+pytest
 ```
 
-- Streamlit UI: http://localhost:8501
-- Go Renderer: http://localhost:8080
+## 라이선스
 
-### 로컬 실행
-
-```bash
-# 1. Python 패키지 설치
-pip install -e ".[nnunet]"
-
-# 2. Streamlit 실행 (터미널 1)
-make run
-
-# 3. Go 렌더러 실행 (터미널 2)
-make run-renderer
-```
-
-## Make Commands
-
-| Command | Description |
-|---------|-------------|
-| `make run` | Streamlit 앱 실행 (port 8501) |
-| `make run-renderer` | Go 3D 렌더러 실행 (port 8080) |
-| `make install` | Python 패키지 설치 (nnUNet 포함) |
-| `make dev` | 개발 의존성 설치 (pytest, ruff) |
-| `make build-renderer` | Go 렌더러 컴파일 |
-| `make clean` | 업로드/결과/메쉬 데이터 삭제 |
-
-## Configuration
-
-### configs/app.yaml
-
-```yaml
-app:
-  name: "Medical 3D Viewer"
-  port: 8501
-
-renderer:
-  host: localhost
-  port: 8080
-
-paths:
-  uploads: data/uploads
-  results: data/results
-  models: data/models
-
-nnunet:
-  weight_dir: /path/to/nnUNet_results
-  auto_scan: true
-```
-
-### configs/models.yaml
-
-모델과 파이프라인을 정의합니다:
-
-```yaml
-models:
-  - id: aorta_seg
-    name: "TAVR Aorta Segmentation"
-    dataset_id: 302
-    labels:
-      1: "대동맥"
-      2: "좌심실"
-      # ...
-
-pipelines:
-  - id: tavr_full
-    name: "TAVR 종합 분석"
-    steps:
-      - model_id: aorta_seg
-        priority: 1
-      - model_id: vessel_total
-        priority: 2
-    merge_strategy: union
-```
-
-## Application Pages
-
-| Page | Description |
-|------|-------------|
-| **Viewer** | CT 업로드, AI 세그멘테이션, MPR/3D 시각화 |
-| **Editor** | 세그멘테이션 수동 편집 (모폴로지 연산) |
-| **History** | 환자별 분석 이력 조회 |
-| **Models** | nnUNet 모델 가중치 관리 |
-| **Settings** | 서비스 상태, 데이터 관리 |
-
-## nnUNet 없이 사용
-
-nnUNet이 설치되지 않아도 다음 기능을 사용할 수 있습니다:
-- CT NIfTI 파일 MPR 뷰어
-- 기존 세그멘테이션 로드 및 시각화
-- 세그멘테이션 편집 및 내보내기
-- 3D 렌더링
-
-```bash
-pip install -e .  # nnUNet 제외 설치
-```
-
-## Testing
-
-```bash
-make dev
-pytest tests/ -v
-```
-
-## Requirements
-
-- Python >= 3.10
-- Go >= 1.22 (3D 렌더러)
-- CUDA (GPU 추론, 선택사항)
-
-## License
-
-MIT
+Private
