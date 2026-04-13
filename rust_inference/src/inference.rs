@@ -1,37 +1,39 @@
 //! ONNX Runtime sliding window inference with optional TTA (mirroring).
 
 use anyhow::{Context, Result};
-use ndarray::{Array3, Array5, s};
-use ort::session::Session;
+use ndarray::{Array3, Array4, s};
 use std::path::Path;
 
 use crate::progress::ProgressReporter;
 
 /// Load ONNX model session.
-pub fn load_model(model_path: &Path, use_cuda: bool) -> Result<Session> {
-    let mut builder = Session::builder()?;
+pub fn load_model(model_path: &Path, use_cuda: bool) -> Result<ort::session::Session> {
+    let builder = ort::session::Session::builder()
+        .map_err(|e| anyhow::anyhow!("Session builder error: {e}"))?;
 
-    if use_cuda {
-        // Try CUDA, fall back to CPU
-        match builder.clone().with_execution_providers([
-            ort::execution_providers::CUDAExecutionProvider::default().build(),
-        ]) {
-            Ok(b) => builder = b,
-            Err(_) => eprintln!("CUDA not available, falling back to CPU"),
-        }
-    }
+    let builder = if use_cuda {
+        builder
+            .with_execution_providers([
+                ort::execution_providers::CUDAExecutionProvider::default().build(),
+            ])
+            .unwrap_or_else(|_| {
+                eprintln!("CUDA not available, falling back to CPU");
+                ort::session::Session::builder().unwrap()
+            })
+    } else {
+        builder
+    };
 
     let session = builder
-        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
         .commit_from_file(model_path)
-        .with_context(|| format!("Failed to load ONNX: {}", model_path.display()))?;
+        .map_err(|e| anyhow::anyhow!("Failed to load ONNX {}: {e}", model_path.display()))?;
 
     Ok(session)
 }
 
 /// Run sliding window inference on a preprocessed volume.
 pub fn sliding_window_inference(
-    session: &Session,
+    session: &ort::session::Session,
     volume: &Array3<f32>,
     patch_size: [usize; 3],
     num_classes: usize,
@@ -43,46 +45,35 @@ pub fn sliding_window_inference(
     let shape = volume.shape();
     let [d, h, w] = [shape[0], shape[1], shape[2]];
 
-    // Compute stride
     let stride = [
         (patch_size[0] as f64 * tile_step_size).max(1.0) as usize,
         (patch_size[1] as f64 * tile_step_size).max(1.0) as usize,
         (patch_size[2] as f64 * tile_step_size).max(1.0) as usize,
     ];
 
-    // Compute patch positions
     let positions = compute_patch_positions([d, h, w], patch_size, stride);
     let total_patches = positions.len();
-    let mirror_count = if use_mirroring { 1 << mirror_axes.len() } else { 1 };
 
-    // Accumulation buffers
-    let mut aggregated = ndarray::Array4::<f32>::zeros([num_classes, d, h, w]);
+    let mut aggregated = Array4::<f32>::zeros([num_classes, d, h, w]);
     let mut weight_map = Array3::<f32>::zeros([d, h, w]);
-
-    // Gaussian importance map for overlap blending
     let gaussian = generate_gaussian_importance(patch_size);
 
-    progress.report(0.3, &format!("추론 시작 ({total_patches} patches, mirror={mirror_count}x)"));
+    progress.report(0.3, &format!("추론 시작 ({total_patches} patches)"));
 
     for (idx, &(pz, py, px)) in positions.iter().enumerate() {
         let pz_end = (pz + patch_size[0]).min(d);
         let py_end = (py + patch_size[1]).min(h);
         let px_end = (px + patch_size[2]).min(w);
 
-        // Extract patch
         let patch = volume.slice(s![pz..pz_end, py..py_end, px..px_end]).to_owned();
-
-        // Pad if patch is smaller than patch_size
         let padded = pad_patch(&patch, patch_size);
 
-        // Run inference (with optional mirroring)
         let prediction = if use_mirroring {
             infer_with_mirroring(session, &padded, mirror_axes)?
         } else {
             infer_patch(session, &padded)?
         };
 
-        // Accumulate results
         let actual_d = pz_end - pz;
         let actual_h = py_end - py;
         let actual_w = px_end - px;
@@ -146,42 +137,53 @@ pub fn sliding_window_inference(
     Ok(segmentation)
 }
 
-fn infer_patch(session: &Session, patch: &Array3<f32>) -> Result<ndarray::Array4<f32>> {
-    let shape = patch.shape();
-    // Reshape to [1, 1, D, H, W] (batch=1, channel=1)
-    let input = patch
-        .clone()
-        .into_shape_with_order([1, 1, shape[0], shape[1], shape[2]])?;
+fn infer_patch(session: &ort::session::Session, patch: &Array3<f32>) -> Result<Array4<f32>> {
+    let [d, h, w] = [patch.shape()[0], patch.shape()[1], patch.shape()[2]];
 
-    let input_values = ort::value::Tensor::from_array(input)?;
-    let outputs = session.run(ort::inputs![input_values]?)?;
+    // Build [1, 1, D, H, W] input
+    let raw: Vec<f32> = patch.iter().copied().collect();
+    let input = ndarray::Array5::<f32>::from_shape_vec([1, 1, d, h, w], raw)
+        .context("Failed to reshape input")?;
 
-    let output = outputs[0]
+    let input_tensor = ort::value::Tensor::from_array(input)
+        .map_err(|e| anyhow::anyhow!("Tensor creation error: {e}"))?;
+
+    let outputs = session
+        .run(ort::inputs![input_tensor].map_err(|e| anyhow::anyhow!("Input error: {e}"))?)
+        .map_err(|e| anyhow::anyhow!("Inference error: {e}"))?;
+
+    let output_view = outputs[0]
         .try_extract_tensor::<f32>()
-        .context("Failed to extract output tensor")?;
+        .map_err(|e| anyhow::anyhow!("Output extraction error: {e}"))?;
 
-    // Output: [1, num_classes, D, H, W] → [num_classes, D, H, W]
-    let output_shape = output.shape();
-    let result = output
-        .to_owned()
-        .into_shape_with_order([output_shape[1], output_shape[2], output_shape[3], output_shape[4]])?;
+    let output_shape = output_view.shape();
+    let nc = output_shape[1];
+    let od = output_shape[2];
+    let oh = output_shape[3];
+    let ow = output_shape[4];
 
-    // Apply softmax
+    // Copy to owned Array4 [nc, od, oh, ow]
+    let raw_out: Vec<f32> = output_view.iter().copied().collect();
+    let out_5d = ndarray::Array5::<f32>::from_shape_vec([1, nc, od, oh, ow], raw_out)
+        .context("Reshape output")?;
+    let result = out_5d.index_axis(ndarray::Axis(0), 0).to_owned();
+
+    // Softmax
     let mut softmaxed = result.clone();
-    for z in 0..output_shape[2] {
-        for y in 0..output_shape[3] {
-            for x in 0..output_shape[4] {
+    for z in 0..od {
+        for y in 0..oh {
+            for x in 0..ow {
                 let mut max_val = f32::NEG_INFINITY;
-                for c in 0..output_shape[1] {
+                for c in 0..nc {
                     max_val = max_val.max(result[[c, z, y, x]]);
                 }
                 let mut sum_exp = 0.0f32;
-                for c in 0..output_shape[1] {
+                for c in 0..nc {
                     let e = (result[[c, z, y, x]] - max_val).exp();
                     softmaxed[[c, z, y, x]] = e;
                     sum_exp += e;
                 }
-                for c in 0..output_shape[1] {
+                for c in 0..nc {
                     softmaxed[[c, z, y, x]] /= sum_exp;
                 }
             }
@@ -192,29 +194,28 @@ fn infer_patch(session: &Session, patch: &Array3<f32>) -> Result<ndarray::Array4
 }
 
 fn infer_with_mirroring(
-    session: &Session,
+    session: &ort::session::Session,
     patch: &Array3<f32>,
     mirror_axes: &[usize],
-) -> Result<ndarray::Array4<f32>> {
+) -> Result<Array4<f32>> {
     let base = infer_patch(session, patch)?;
-    let num_mirrors = 1 << mirror_axes.len();
+    let num_mirrors = 1usize << mirror_axes.len();
     let mut accumulated = base.clone();
 
     for mirror_idx in 1..num_mirrors {
-        // Create mirrored input
         let mut mirrored = patch.clone();
         for (bit, &axis) in mirror_axes.iter().enumerate() {
             if mirror_idx & (1 << bit) != 0 {
-                flip_axis_inplace(&mut mirrored, axis);
+                mirrored.invert_axis(ndarray::Axis(axis));
             }
         }
 
         let mut pred = infer_patch(session, &mirrored)?;
 
-        // Flip prediction back
+        // Flip prediction back (axis + 1 for class dimension)
         for (bit, &axis) in mirror_axes.iter().enumerate() {
             if mirror_idx & (1 << bit) != 0 {
-                flip_axis_4d_inplace(&mut pred, axis + 1); // +1 because pred has class dim
+                pred.invert_axis(ndarray::Axis(axis + 1));
             }
         }
 
@@ -225,73 +226,35 @@ fn infer_with_mirroring(
     Ok(accumulated)
 }
 
-fn flip_axis_inplace(arr: &mut Array3<f32>, axis: usize) {
-    let len = arr.shape()[axis];
-    for i in 0..len / 2 {
-        let j = len - 1 - i;
-        // Swap slices along axis
-        let shape = arr.shape().to_vec();
-        for idx in ndarray::indices(&shape[..]) {
-            let mut idx_i = idx.clone().into_pattern();
-            let mut idx_j = idx.clone().into_pattern();
-            // Only swap when the axis index matches
-            match axis {
-                0 if idx.as_array_view()[0] == i => {
-                    let vi = arr[idx.as_array_view().as_slice().unwrap()];
-                    // This is simplified; real implementation would use raw slicing
-                    let _ = vi;
-                }
-                _ => {}
-            }
-        }
-        // Simplified: use slice assignment
-        break; // Placeholder
-    }
-    // Use ndarray's built-in slice reversal
-    arr.invert_axis(ndarray::Axis(axis));
-}
-
-fn flip_axis_4d_inplace(arr: &mut ndarray::Array4<f32>, axis: usize) {
-    arr.invert_axis(ndarray::Axis(axis));
-}
-
 fn compute_patch_positions(
     volume_shape: [usize; 3],
     patch_size: [usize; 3],
     stride: [usize; 3],
 ) -> Vec<(usize, usize, usize)> {
     let mut positions = Vec::new();
-    let mut z = 0;
-    while z + patch_size[0] <= volume_shape[0] || z == 0 {
-        let mut y = 0;
-        while y + patch_size[1] <= volume_shape[1] || y == 0 {
-            let mut x = 0;
-            while x + patch_size[2] <= volume_shape[2] || x == 0 {
-                positions.push((z, y, x));
-                x += stride[2];
-                if x + patch_size[2] > volume_shape[2] && x < volume_shape[2] {
-                    x = volume_shape[2].saturating_sub(patch_size[2]);
-                    positions.push((z, y, x));
-                    break;
-                }
-            }
-            y += stride[1];
-            if y + patch_size[1] > volume_shape[1] && y < volume_shape[1] {
-                y = volume_shape[1].saturating_sub(patch_size[1]);
-            } else if y + patch_size[1] > volume_shape[1] {
-                break;
-            }
+
+    let steps = |dim: usize, patch: usize, step: usize| -> Vec<usize> {
+        let mut v = Vec::new();
+        let mut pos = 0;
+        while pos + patch <= dim {
+            v.push(pos);
+            pos += step;
         }
-        z += stride[0];
-        if z + patch_size[0] > volume_shape[0] && z < volume_shape[0] {
-            z = volume_shape[0].saturating_sub(patch_size[0]);
-        } else if z + patch_size[0] > volume_shape[0] {
-            break;
+        if v.is_empty() || *v.last().unwrap() + patch < dim {
+            v.push(dim.saturating_sub(patch));
+        }
+        v.sort();
+        v.dedup();
+        v
+    };
+
+    for z in steps(volume_shape[0], patch_size[0], stride[0]) {
+        for y in steps(volume_shape[1], patch_size[1], stride[1]) {
+            for x in steps(volume_shape[2], patch_size[2], stride[2]) {
+                positions.push((z, y, x));
+            }
         }
     }
-
-    positions.sort();
-    positions.dedup();
     positions
 }
 
@@ -321,7 +284,6 @@ fn generate_gaussian_importance(patch_size: [usize; 3]) -> Array3<f32> {
             }
         }
     }
-    // Normalize so max = 1
     let max_val = importance.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     if max_val > 0.0 {
         importance /= max_val;
