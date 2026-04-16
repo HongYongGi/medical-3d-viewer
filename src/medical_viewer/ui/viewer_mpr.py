@@ -197,13 +197,9 @@ def render_mpr_viewer(ct_path: str, seg_path: str | None = None):
          ct_slicer.num_coronal, "cor"),
     ]:
         with tab:
-            idx = st.slider(f"{view_name} Slice", 0, num_slices - 1,
-                             num_slices // 2, key=f"{key_prefix}_idx")
-            ct_slice = get_slice(idx)
-            seg_slice = get_seg(idx) if get_seg else None
-            _show_slice_info(ct_slice, idx, view_name, num_slices)
-            fig = _create_mpr_figure(ct_slice, seg_slice, **render_kwargs)
-            st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_chart")
+            _render_slice_view(
+                view_name, get_slice, get_seg, num_slices, key_prefix, render_kwargs
+            )
 
     with tab_obl:
         from ..mpr.oblique import normal_from_angles, center_from_volume
@@ -263,6 +259,35 @@ def render_mpr_viewer(ct_path: str, seg_path: str | None = None):
         _render_measurement_tab(ct_slicer, seg_slicer, render_kwargs)
 
 
+@st.fragment
+def _render_slice_view(view_name, get_slice, get_seg, num_slices, key_prefix, render_kwargs):
+    """Render a single slice view as a fragment (partial rerun on slider change)."""
+    idx = st.slider(f"{view_name} Slice", 0, num_slices - 1,
+                     num_slices // 2, key=f"{key_prefix}_idx")
+    ct_slice = get_slice(idx)
+    seg_slice = get_seg(idx) if get_seg else None
+    _show_slice_info(ct_slice, idx, view_name, num_slices)
+
+    # Fast path: PIL Image (skip Plotly overhead)
+    use_fast = render_kwargs.get("overlay_mode") != "contour"
+    if use_fast and not render_kwargs.get("show_crosshair"):
+        from ..mpr.fast_render import render_slice_to_image
+        img = render_slice_to_image(
+            ct_slice, seg_slice,
+            window_center=render_kwargs["window_center"],
+            window_width=render_kwargs["window_width"],
+            colormap=render_kwargs.get("colormap", "gray"),
+            show_seg=render_kwargs.get("show_seg", True),
+            seg_opacity=render_kwargs.get("seg_opacity", 0.4),
+            visible_labels=render_kwargs.get("visible_labels"),
+            label_colors=LABEL_COLORS,
+        )
+        st.image(img, use_container_width=True)
+    else:
+        fig = _create_mpr_figure(ct_slice, seg_slice, **render_kwargs)
+        st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_chart")
+
+
 def _show_slice_info(ct_slice: np.ndarray, idx: int, view: str, total: int):
     st.caption(
         f"**{view}** | Slice {idx}/{total-1} | "
@@ -271,6 +296,7 @@ def _show_slice_info(ct_slice: np.ndarray, idx: int, view: str, total: int):
     )
 
 
+@st.fragment
 def _render_linked_view(ct_slicer, seg_slicer, **kwargs):
     """Render 3-panel linked view with crosshair sync."""
     st.markdown("**3D Slicer 스타일 연동 뷰**")
@@ -321,6 +347,7 @@ def _render_linked_view(ct_slicer, seg_slicer, **kwargs):
         st.plotly_chart(fig, use_container_width=True, key="linked_cor_chart")
 
 
+@st.fragment
 def _render_measurement_tab(ct_slicer, seg_slicer, render_kwargs):
     """Render measurement tools tab."""
     st.markdown("### 📏 측정 도구")

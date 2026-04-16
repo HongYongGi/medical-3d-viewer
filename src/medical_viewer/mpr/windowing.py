@@ -41,6 +41,18 @@ def get_preset(name: str) -> dict:
     return WINDOW_PRESETS.get(name, WINDOW_PRESETS["CT-Abdomen"])
 
 
+def apply_window_cached(image: np.ndarray, preset_name: str) -> np.ndarray:
+    """Apply a named window preset with caching support.
+
+    For use with known presets where (center, width) are fixed.
+    The caller can cache results keyed by (slice_index, preset_name).
+    """
+    preset = WINDOW_PRESETS.get(preset_name)
+    if preset is None:
+        return apply_window(image, 40, 400)
+    return apply_window(image, preset["center"], preset["width"])
+
+
 def auto_window(image: np.ndarray, percentile_low: float = 1, percentile_high: float = 99) -> tuple[float, float]:
     """Auto-compute window center/width from image percentiles."""
     low = np.percentile(image, percentile_low)
